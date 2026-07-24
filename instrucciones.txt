@@ -1,0 +1,108 @@
+PLATAFORMA DE REPORTES Y ANÁLISIS DE DATOS
+==========================================
+
+REQUISITOS PREVIOS
+------------------
+
+1. Tener Python instalado.
+   Descargar desde:
+   https://www.python.org/downloads/
+
+   IMPORTANTE:
+   Durante la instalación marcar la opción:
+   [✓] Add Python to PATH
+
+2. Verificar la instalación de Python:
+
+   Abrir una terminal (CMD o PowerShell) y ejecutar:
+
+   python --version
+
+   Debe mostrar una versión de Python instalada.
+
+
+INSTALACIÓN DEL PROYECTO
+------------------------
+
+1. Descargar o clonar el proyecto desde GitHub.
+
+2. Abrir una terminal dentro de la carpeta del proyecto.
+
+3. Instalar las dependencias necesarias:
+
+   pip install -r requirements.txt
+
+   Esto instalará:
+
+   - streamlit
+   - pandas
+   - plotly
+   - openpyxl
+
+
+EJECUTAR LA APLICACIÓN
+----------------------
+
+Desde la carpeta del proyecto ejecutar:
+
+   python -m streamlit run app.py                           
+
+Si todo funciona correctamente aparecerá un mensaje similar a:
+
+   Local URL: http://localhost:8501
+
+Abrir esa dirección en el navegador.
+
+
+USO DEL SISTEMA
+---------------
+
+1. Presionar "Browse files".
+
+2. Seleccionar un archivo Excel (.xlsx) o CSV (.csv).
+
+3. El sistema cargará automáticamente los datos.
+
+4. Utilizar los filtros disponibles en la barra lateral.
+
+5. Seleccionar:
+
+   - Tipo de gráfico
+   - Columna para eje X
+   - Columna para eje Y
+
+6. Visualizar:
+
+   - Indicadores (KPIs)
+   - Tablas de datos
+   - Gráficos interactivos
+
+
+FORMATO DE DATOS RECOMENDADO
+----------------------------
+
+Ejemplo de archivo:
+
+Fecha,Producto,Categoria,Total
+2026-01-01,Laptop,Tecnologia,1200
+2026-01-02,Mouse,Accesorios,25
+2026-01-03,Teclado,Accesorios,50
+2026-01-04,Monitor,Tecnologia,300
+
+La columna utilizada para valores numéricos debe contener únicamente números.
+
+
+TECNOLOGÍAS UTILIZADAS
+----------------------
+
+- Python
+- Streamlit
+- Pandas
+- Plotly
+- OpenPyXL
+
+
+AUTORES
+--------
+
+Proyecto académico desarrollado para la asignatura de análisis y visualización de datos.
