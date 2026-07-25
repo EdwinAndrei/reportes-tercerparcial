@@ -808,7 +808,14 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
         st.dataframe(datos, use_container_width=True)
 
         # --- Filtros propios de este dataset ---
-        st.markdown("**Filtros**")
+        col_titulo_filtros, col_boton_reset = st.columns([4, 1])
+        with col_titulo_filtros:
+            st.markdown("**Filtros**")
+        with col_boton_reset:
+            if st.button("🧹 Quitar todos los filtros", key=f"reset_{nombre_ds}"):
+                limpiar_filtros_dataset(nombre_ds)
+                st.rerun()
+
         datos_filtrados = datos.copy()
 
         columnas_categoricas = [
@@ -847,6 +854,50 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
                 datos_filtrados = datos_filtrados[
                     (datos_filtrados[col].dt.date >= rango[0]) & (datos_filtrados[col].dt.date <= rango[1])
                 ]
+
+        # Filtro por rango numérico
+        columnas_numericas_filtro = datos.select_dtypes(include="number").columns.tolist()
+        if columnas_numericas_filtro:
+            with st.expander("Filtrar por rango numérico"):
+                columnas_rango_ui = st.columns(min(3, len(columnas_numericas_filtro)))
+                for i, col in enumerate(columnas_numericas_filtro):
+                    col_valida = datos[col].dropna()
+                    if col_valida.empty:
+                        continue
+                    minimo, maximo = float(col_valida.min()), float(col_valida.max())
+                    if minimo == maximo:
+                        continue
+                    with columnas_rango_ui[i % len(columnas_rango_ui)]:
+                        rango_num = st.slider(
+                            f"{col}", min_value=minimo, max_value=maximo,
+                            value=(minimo, maximo), key=f"rango_num_{nombre_ds}_{col}"
+                        )
+                    datos_filtrados = datos_filtrados[
+                        (datos_filtrados[col] >= rango_num[0]) & (datos_filtrados[col] <= rango_num[1])
+                    ]
+
+        # Búsqueda de una palabra dentro de una columna
+        columnas_texto_busqueda = [
+            c for c in datos.columns
+            if datos[c].dtype == "object" or str(datos[c].dtype) == "category"
+        ]
+        if columnas_texto_busqueda:
+            with st.expander("Buscar palabra en una columna"):
+                col_busq_1, col_busq_2 = st.columns(2)
+                with col_busq_1:
+                    columna_busqueda = st.selectbox(
+                        "Columna", columnas_texto_busqueda, key=f"busqueda_col_{nombre_ds}"
+                    )
+                with col_busq_2:
+                    texto_busqueda = st.text_input(
+                        "Palabra o texto a buscar", key=f"busqueda_texto_{nombre_ds}"
+                    )
+                if texto_busqueda:
+                    datos_filtrados = datos_filtrados[
+                        datos_filtrados[columna_busqueda]
+                        .astype(str)
+                        .str.contains(texto_busqueda, case=False, na=False)
+                    ]
 
         if datos_filtrados.empty:
             st.warning("Los filtros seleccionados no arrojan ningún registro para este dataset.")
