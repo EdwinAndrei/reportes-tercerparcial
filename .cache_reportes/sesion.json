@@ -1,13 +1,74 @@
 {
   "archivos": [
     {
-      "nombre": "pruebacomponentes.xlsx",
+      "nombre": "Testapp.xlsx",
       "tipo": "xlsx"
     }
   ],
-  "graficos": [],
-  "datasets_seleccionados": [
-    "pruebacomponentes.xlsx [Sheet1]"
+  "graficos": [
+    {
+      "id": "g0_1784999929.410223",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Fecha",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "Pepper",
+      "orden": "Sin ordenar",
+      "paleta": "Vivid"
+    },
+    {
+      "id": "g1_1784999952.980002",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Producto",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "Total por producto -EMPRESA 2026",
+      "orden": "Sin ordenar",
+      "paleta": "Vivid"
+    },
+    {
+      "id": "g2_1784999969.342878",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Producto",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "Total por producto -EMPRESA 2026",
+      "orden": "Sin ordenar",
+      "paleta": "Bold"
+    },
+    {
+      "id": "g3_1785000041.636888",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Producto",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "Total por producto -EMPRESA 2026 (copia)",
+      "orden": "Sin ordenar",
+      "paleta": "Bold"
+    },
+    {
+      "id": "g4_1785000045.139172",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Producto",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "Total por producto -EMPRESA 2026",
+      "orden": "Mayor a menor",
+      "paleta": "Bold"
+    },
+    {
+      "id": "g5_1785000076.325507",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Producto",
+      "eje_y": "Total",
+      "tipo": "Pastel",
+      "titulo": "Total por producto -EMPRESA 2026",
+      "orden": "Mayor a menor",
+      "paleta": "Bold"
+    }
   ],
-  "fecha": "2026-07-25 10:03:22"
+  "datasets_seleccionados": [
+    "Testapp.xlsx [Sheet1]"
+  ],
+  "fecha": "2026-07-25 11:22:05"
 }

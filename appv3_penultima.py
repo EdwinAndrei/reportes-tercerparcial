@@ -431,6 +431,18 @@ def leer_sub_dataset(nombre: str, info: dict, etiqueta, fila_encabezado: int = 0
 
 PALETA_COLORES = px.colors.qualitative.Plotly  # paleta de colores explícita para forzar color en la exportación
 
+# ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
+# Paletas de colores seleccionables por el usuario para cada gráfico
+PALETAS_DISPONIBLES = {
+    "Plotly (predeterminada)": px.colors.qualitative.Plotly,
+    "Pastel": px.colors.qualitative.Pastel,
+    "Vivid": px.colors.qualitative.Vivid,
+    "Set2": px.colors.qualitative.Set2,
+    "Bold": px.colors.qualitative.Bold,
+    "Safe": px.colors.qualitative.Safe,
+}
+# ============ FIN CAMBIOS Alanis============
+
 # Tamaño de embebido de cada gráfico en la hoja "Graficos" del Excel (en píxeles).
 # Se fija explícitamente para que las imágenes no se dibujen "a tamaño completo" (lo que
 # provocaba que unas taparan a otras); a partir de este tamaño se calcula cuántas filas
@@ -894,6 +906,28 @@ else:
             eje_y_nuevo = st.selectbox("Eje Y (numérico)", columnas_num_grafico, key="nuevo_eje_y")
         with col_tipo:
             tipo_nuevo = st.selectbox("Tipo de gráfico", ["Barras", "Pastel", "Líneas", "Dispersión"], key="nuevo_tipo")
+
+        # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
+        titulo_nuevo = st.text_input(
+            "Título del gráfico (opcional — si se deja vacío se genera uno automático)",
+            key="nuevo_titulo",
+        )
+
+        col_orden, col_paleta = st.columns(2)
+        with col_orden:
+            orden_nuevo = st.selectbox(
+                "Orden de los datos",
+                ["Sin ordenar", "Mayor a menor", "Menor a mayor"],
+                key="nuevo_orden",
+            )
+        with col_paleta:
+            paleta_nueva = st.selectbox(
+                "Paleta de colores",
+                list(PALETAS_DISPONIBLES.keys()),
+                key="nueva_paleta",
+            )
+        # ============ FIN CAMBIOS Alanis ============
+
         agregar = st.form_submit_button("➕ Agregar gráfico")
         if agregar:
             st.session_state.graficos.append({
@@ -902,6 +936,11 @@ else:
                 "eje_x": eje_x_nuevo,
                 "eje_y": eje_y_nuevo,
                 "tipo": tipo_nuevo,
+                # ---- Campos agregados por Alanis ----
+                "titulo": titulo_nuevo.strip(),
+                "orden": orden_nuevo,
+                "paleta": paleta_nueva,
+                # ---- fin campos Alanis ----
             })
             guardar_sesion()
             st.rerun()
@@ -927,6 +966,15 @@ else:
             st.info(f"'{g['dataset']}' no tiene registros con los filtros actuales; este gráfico se omite.")
             continue
 
+        # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
+        # Valores con .get() para no romper gráficos guardados de sesiones anteriores
+        # a esta actualización (que no tenían título/orden/paleta propios).
+        titulo_personalizado = (g.get("titulo") or "").strip()
+        orden_grafico = g.get("orden", "Sin ordenar")
+        nombre_paleta = g.get("paleta", "Plotly (predeterminada)")
+        paleta_grafico = PALETAS_DISPONIBLES.get(nombre_paleta, PALETA_COLORES)
+        # ============ FIN CAMBIOS Alanis ============
+
         st.markdown(f"**{g['tipo']}** — {g['eje_y']} por {g['eje_x']}  _(dataset: {g['dataset']}, datos filtrados)_")
 
         try:
@@ -938,26 +986,53 @@ else:
                 resumen = df_g.groupby(g["eje_x"])[g["eje_y"]].sum().reset_index()
                 col_valor = g["eje_y"]
 
-            color_principal = PALETA_COLORES[indice_color % len(PALETA_COLORES)]
+            # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
+            # Ordenar los datos según lo elegido
+            if orden_grafico == "Mayor a menor":
+                resumen = resumen.sort_values(by=col_valor, ascending=False)
+            elif orden_grafico == "Menor a mayor":
+                resumen = resumen.sort_values(by=col_valor, ascending=True)
+
+            color_principal = paleta_grafico[indice_color % len(paleta_grafico)]  # antes: PALETA_COLORES fijo
+            titulo_auto = f"{col_valor} por {g['eje_x']}"
+            titulo_final = titulo_personalizado if titulo_personalizado else titulo_auto
+            # ============ FIN CAMBIOS Alanis ============
 
             if g["tipo"] == "Barras":
                 fig = px.bar(
-                    resumen, x=g["eje_x"], y=col_valor, title=f"{col_valor} por {g['eje_x']}",
-                    color=g["eje_x"], color_discrete_sequence=PALETA_COLORES,
+                    resumen, x=g["eje_x"], y=col_valor,
+                    title=titulo_final,  # CAMBIO PERSONA 3: antes f"{col_valor} por {g['eje_x']}" fijo
+                    color=g["eje_x"],
+                    color_discrete_sequence=paleta_grafico,  # CAMBIO PERSONA 3: antes PALETA_COLORES fijo
                 )
+                # ============ INICIO CAMBIOS Alanis(Personalizar gráficos) ============
+                # Con orden explícito, se fija el orden de categorías del eje X para
+                # que el sort no lo pierda Plotly al colorear por categoría.
+                if orden_grafico != "Sin ordenar":
+                    fig.update_xaxes(categoryorder="array", categoryarray=resumen[g["eje_x"]].tolist())
+                # ============ FIN CAMBIOS Alanis ============
             elif g["tipo"] == "Pastel":
+                titulo_pastel = titulo_personalizado if titulo_personalizado else f"Distribución de {col_valor}"  # CAMBIO PERSONA 3
                 fig = px.pie(
-                    resumen, names=g["eje_x"], values=col_valor, title=f"Distribución de {col_valor}",
-                    color_discrete_sequence=PALETA_COLORES,
+                    resumen, names=g["eje_x"], values=col_valor,
+                    title=titulo_pastel,  # CAMBIO Alanis: antes f"Distribución de {col_valor}" fijo
+                    color_discrete_sequence=paleta_grafico,  # CAMBIO Alanis: antes PALETA_COLORES fijo
                 )
             elif g["tipo"] == "Líneas":
                 fig = px.line(
-                    resumen, x=g["eje_x"], y=col_valor, title=f"{col_valor} por {g['eje_x']}",
+                    resumen, x=g["eje_x"], y=col_valor,
+                    title=titulo_final,  # CAMBIO Alanis: antes f"{col_valor} por {g['eje_x']}" fijo
                     markers=True, color_discrete_sequence=[color_principal],
                 )
+                # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
+                if orden_grafico != "Sin ordenar":
+                    fig.update_xaxes(categoryorder="array", categoryarray=resumen[g["eje_x"]].tolist())
+                # ============ FIN CAMBIOS Alanis============
             else:
+                titulo_dispersion = titulo_personalizado if titulo_personalizado else f"{g['eje_y']} vs {g['eje_x']}"  # CAMBIO Alanis
                 fig = px.scatter(
-                    df_g, x=g["eje_x"], y=g["eje_y"], title=f"{g['eje_y']} vs {g['eje_x']}",
+                    df_g, x=g["eje_x"], y=g["eje_y"],
+                    title=titulo_dispersion,  # CAMBIO Alanis: antes f"{g['eje_y']} vs {g['eje_x']}" fijo
                     color_discrete_sequence=[color_principal],
                 )
 
@@ -965,16 +1040,32 @@ else:
 
             imagen_png = fig_a_imagen_png(fig)
             if imagen_png:
-                titulo_grafico = f"{g['tipo']} - {col_valor} por {g['eje_x']} ({g['dataset']})"
+                # CAMBIO Alanis: se usa el título personalizado si existe, si no el formato original
+                titulo_grafico = f"{titulo_final} ({g['dataset']})" if titulo_personalizado else f"{g['tipo']} - {col_valor} por {g['eje_x']} ({g['dataset']})"
                 imagenes_graficos.append((titulo_grafico, imagen_png, g["dataset"]))
 
         except Exception as e:
             st.error(f"No fue posible generar este gráfico: {e}")
 
-        if st.button("🗑️ Eliminar este gráfico", key=f"del_{g['id']}"):
-            st.session_state.graficos = [x for x in st.session_state.graficos if x["id"] != g["id"]]
-            guardar_sesion()
-            st.rerun()
+        # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
+        # Antes solo existía el botón "Eliminar"; se agregó una columna con el botón "Duplicar"
+        col_dup, col_del = st.columns(2)
+        with col_dup:
+            if st.button("📋 Duplicar este gráfico", key=f"dup_{g['id']}"):
+                nuevo_grafico = dict(g)
+                nuevo_grafico["id"] = f"g{len(st.session_state.graficos)}_{datetime.now().timestamp()}"
+                nombre_base = titulo_personalizado if titulo_personalizado else f"{g['tipo']} - {g['eje_y']} por {g['eje_x']}"
+                nuevo_grafico["titulo"] = f"{nombre_base} (copia)"
+                st.session_state.graficos.append(nuevo_grafico)
+                guardar_sesion()
+                st.rerun()
+        with col_del:
+            # ---- Botón original de eliminar (solo se movió dentro de la columna col_del) ----
+            if st.button("🗑️ Eliminar este gráfico", key=f"del_{g['id']}"):
+                st.session_state.graficos = [x for x in st.session_state.graficos if x["id"] != g["id"]]
+                guardar_sesion()
+                st.rerun()
+        # ============ FIN CAMBIOS Alanis ============
 
         st.divider()
 
