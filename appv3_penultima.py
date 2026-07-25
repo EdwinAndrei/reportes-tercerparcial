@@ -313,6 +313,23 @@ def validar_calidad_datos(df: pd.DataFrame) -> list:
 
     return advertencias
 
+def limpiar_filtros_dataset(nombre_ds: str):
+    """
+    Borra del estado de sesión todos los widgets de filtro de este dataset
+    (categóricos, fecha, rango numérico, búsqueda de texto, columnas ocultas)
+    para que vuelvan a su valor por defecto.
+    """
+    prefijos = (
+        f"filtro_{nombre_ds}_",
+        f"fecha_{nombre_ds}_",
+        f"rango_num_{nombre_ds}_",
+        f"busqueda_col_{nombre_ds}",
+        f"busqueda_texto_{nombre_ds}",
+        f"ocultar_cols_{nombre_ds}",
+    )
+    claves_a_borrar = [k for k in st.session_state.keys() if k.startswith(prefijos)]
+    for k in claves_a_borrar:
+        del st.session_state[k]
 
 # ====================================
 # LECTORES MULTI-FORMATO (Excel, CSV, Word, PDF, SQLite)
