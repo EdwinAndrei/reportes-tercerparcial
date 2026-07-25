@@ -807,14 +807,55 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
         st.markdown("**Vista previa**")
         st.dataframe(datos, use_container_width=True)
 
+        def _resetear_filtros_callback(nombre_ds=nombre_ds, datos=datos):
+            columnas_categoricas_r = [
+                c for c in datos.columns
+                if (pd.api.types.is_object_dtype(datos[c]) or pd.api.types.is_string_dtype(datos[c]) or str(datos[c].dtype) == "category")
+                and datos[c].nunique(dropna=True) <= 50
+            ]
+            for col in columnas_categoricas_r:
+                valores = sorted(datos[col].dropna().unique().tolist())
+                st.session_state[f"filtro_{nombre_ds}_{col}"] = valores
+
+            columnas_fecha_r = [c for c in datos.columns if pd.api.types.is_datetime64_any_dtype(datos[c])]
+            for col in columnas_fecha_r:
+                col_valida = datos[col].dropna()
+                if col_valida.empty:
+                    continue
+                fmin, fmax = col_valida.min().date(), col_valida.max().date()
+                if fmin == fmax:
+                    continue
+                st.session_state[f"fecha_{nombre_ds}_{col}"] = (fmin, fmax)
+
+            columnas_numericas_r = datos.select_dtypes(include="number").columns.tolist()
+            for col in columnas_numericas_r:
+                col_valida = datos[col].dropna()
+                if col_valida.empty:
+                    continue
+                rmin, rmax = int(col_valida.min()), int(col_valida.max())
+                if rmin == rmax:
+                    continue
+                st.session_state[f"rango_num_{nombre_ds}_{col}"] = (rmin, rmax)
+
+            columnas_texto_r = [
+                c for c in datos.columns
+                if pd.api.types.is_object_dtype(datos[c]) or pd.api.types.is_string_dtype(datos[c]) or str(datos[c].dtype) == "category"
+            ]
+            if columnas_texto_r:
+                st.session_state[f"busqueda_col_{nombre_ds}"] = columnas_texto_r[0]
+            st.session_state[f"busqueda_texto_{nombre_ds}"] = ""
+            st.session_state[f"ocultar_cols_{nombre_ds}"] = []
+
         # --- Filtros propios de este dataset ---
         col_titulo_filtros, col_boton_reset = st.columns([4, 1])
         with col_titulo_filtros:
             st.markdown("**Filtros**")
         with col_boton_reset:
-            if st.button("🧹 Quitar todos los filtros", key=f"reset_{nombre_ds}"):
-                limpiar_filtros_dataset(nombre_ds)
-                st.rerun()
+            st.button(
+                "🧹 Quitar todos los filtros",
+                key=f"reset_{nombre_ds}",
+                on_click=_resetear_filtros_callback,
+            )
 
         datos_filtrados = datos.copy()
 
@@ -864,7 +905,7 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
                     col_valida = datos[col].dropna()
                     if col_valida.empty:
                         continue
-                    minimo, maximo = float(col_valida.min()), float(col_valida.max())
+                    minimo, maximo = int(col_valida.min()), int(col_valida.max())
                     if minimo == maximo:
                         continue
                     with columnas_rango_ui[i % len(columnas_rango_ui)]:
@@ -901,6 +942,14 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
 
         if datos_filtrados.empty:
             st.warning("Los filtros seleccionados no arrojan ningún registro para este dataset.")
+
+        # Ocultar columnas
+        columnas_a_ocultar = st.multiselect(
+            "Ocultar columnas (no se muestran ni se incluyen en la tabla/reporte de este dataset)",
+            datos.columns.tolist(), default=[], key=f"ocultar_cols_{nombre_ds}"
+        )
+        if columnas_a_ocultar:
+            datos_filtrados = datos_filtrados.drop(columns=columnas_a_ocultar)
 
         # --- Indicadores propios de este dataset ---
         st.markdown("**Indicadores**")
