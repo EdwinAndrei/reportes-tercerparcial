@@ -283,6 +283,27 @@ def borrar_historial_completo():
     except Exception as e:
         st.sidebar.warning(f"No fue posible borrar el historial: {e}")
 
+# ====================================
+# REINICIAR APLICACIÓN
+# ====================================
+
+# Borra los datos cargados para
+# empezar desde cero.
+
+def empezar_de_cero():
+
+    st.session_state.archivos_originales = {}
+    st.session_state.datasets = {}
+    st.session_state.graficos = []
+    st.session_state.datasets_seleccionados = []
+
+    # Reinicia el cargador de archivos.
+    st.session_state.uploader_key += 1
+
+    # Borra la última sesión guardada.
+    borrar_sesion_guardada()
+
+    st.session_state.confirmar_reinicio = False
 
 # ====================================
 # ESTADO DE SESIÓN (multi-archivo, multi-dataset, multi-gráfico)
@@ -297,6 +318,20 @@ if "graficos" not in st.session_state:
 if "datasets_seleccionados" not in st.session_state:
     st.session_state.datasets_seleccionados = []   # lista de nombres de dataset incluidos en el reporte
 
+# -----------------------------
+# Reiniciar aplicación
+# -----------------------------
+# Variables para reiniciar
+# la aplicación.
+
+if "confirmar_reinicio" not in st.session_state:
+    st.session_state.confirmar_reinicio = False
+
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
+if "archivo_a_quitar" not in st.session_state:
+    st.session_state.archivo_a_quitar = None    
 
 # Ofrecer recuperar la sesión anterior si aún no hay archivos cargados en esta sesión
 if not st.session_state.archivos_originales and hay_sesion_guardada():
@@ -328,6 +363,8 @@ with st.sidebar:
             borrar_sesion_guardada()
             st.success("Sesión guardada eliminada.")
 
+
+
     st.markdown("###  Historial de guardados")
     historial = listar_historial()
     if not historial:
@@ -358,8 +395,18 @@ with st.sidebar:
 # FUNCIONES AUXILIARES DE LECTURA / CALIDAD DE DATOS
 # ====================================
 
+
+# Muestra el tamaño del archivo
+def obtener_tamano_archivo(cantidad_bytes: int) -> str:
+    if cantidad_bytes < 1024 * 1024:
+        tamano = cantidad_bytes / 1024
+        return f"{tamano:.2f} KB - Archivo pequeño"
+
+    tamano = cantidad_bytes / (1024 * 1024)
+    return f"{tamano:.2f} MB - Archivo grande" 
+
+# Normaliza el nombre de las columnas
 def normalizar_nombre(col: str) -> str:
-    """Normaliza un nombre de columna para comparaciones flexibles."""
     return str(col).strip().lower().replace("_", " ")
 
 
@@ -427,9 +474,20 @@ def validar_calidad_datos(df: pd.DataFrame) -> list:
     """Revisa el dataframe y devuelve una lista de advertencias descriptivas."""
     advertencias = []
 
+    
+
     if df.empty:
         advertencias.append("El archivo no contiene registros (está vacío).")
         return advertencias
+
+
+    filas_duplicadas = df.duplicated().sum()
+    if filas_duplicadas > 0:
+        advertencias.append(
+            f"Se encontraron {filas_duplicadas} fila(s) duplicada(s)."
+        )
+    
+
 
     filas_totalmente_vacias = df.isna().all(axis=1).sum()
     if filas_totalmente_vacias > 0:
@@ -774,7 +832,30 @@ archivos_subidos = st.file_uploader(
     "Seleccione uno o varios archivos (puede arrastrar varios a la vez, o agregar más después)",
     type=["xlsx", "xls", "csv", "docx", "pdf", "db", "sqlite", "sqlite3"],
     accept_multiple_files=True,
+    key=f"cargador_{st.session_state.uploader_key}",
 )
+
+
+# Confirmar antes de borrar todo
+if not st.session_state.confirmar_reinicio:
+    if st.button("Empezar de cero"):
+        st.session_state.confirmar_reinicio = True
+        st.rerun()
+
+else:
+    st.warning("¿Está seguro de que desea borrar todos los datos cargados?")
+
+    col_confirmar, col_cancelar = st.columns(2)
+
+    with col_confirmar:
+        if st.button("Sí, borrar todo"):
+            empezar_de_cero()
+            st.rerun()
+
+    with col_cancelar:
+        if st.button("Cancelar"):
+            st.session_state.confirmar_reinicio = False
+            st.rerun()
 
 if archivos_subidos:
     for archivo in archivos_subidos:
@@ -804,35 +885,60 @@ st.subheader("2. Archivos cargados")
 nuevos_datasets = {}
 
 for nombre, info in list(st.session_state.archivos_originales.items()):
-    with st.expander(f"📄 {nombre}  ({info['tipo'].upper()})", expanded=True):
+    tamano_archivo = obtener_tamano_archivo(len(info["bytes"]))
+
+    with st.expander(
+        f"📄 {nombre}  ({info['tipo'].upper()}) - {tamano_archivo}",
+        expanded=True
+    ):
+
         col_info, col_quitar = st.columns([5, 1])
+
         with col_quitar:
-            if st.button("🗑️ Quitar", key=f"quitar_{nombre}"):
-                del st.session_state.archivos_originales[nombre]
-                st.session_state.datasets_seleccionados = [
-                    d for d in st.session_state.datasets_seleccionados if not d.startswith(nombre)
-                ]
-                guardar_sesion()
-                st.rerun()
+            if st.session_state.get("archivo_a_quitar") == nombre:
+                st.warning("¿Está seguro?")
+
+                if st.button("Sí, quitar", key=f"confirmar_quitar_{nombre}"):
+                    del st.session_state.archivos_originales[nombre]
+
+                    st.session_state.datasets_seleccionados = [
+                        d for d in st.session_state.datasets_seleccionados
+                        if not d.startswith(nombre)
+                    ]
+
+                    st.session_state.archivo_a_quitar = None
+                    guardar_sesion()
+                    st.rerun()
+
+                if st.button("Cancelar", key=f"cancelar_quitar_{nombre}"):
+                    st.session_state.archivo_a_quitar = None
+                    st.rerun()
+
+            else:
+                if st.button("🗑️ Quitar", key=f"quitar_{nombre}"):
+                    st.session_state.archivo_a_quitar = nombre
+                    st.rerun()
 
         tipo = info["tipo"]
 
-        if tipo == "csv":
-            fila_sugerida = detectar_fila_encabezado(info["bytes"], True)
-            fila = st.number_input(
-                "Fila donde comienza el encabezado real (0 = primera fila)",
-                min_value=0, max_value=50, value=int(fila_sugerida), key=f"fila_{nombre}"
-            )
-            try:
-                df = leer_sub_dataset(nombre, info, None, fila)
-                df = limpiar_encabezados(df)
-                df = df.loc[:, ~df.columns.astype(str).str.match(r"^Unnamed")]
-                nuevos_datasets[nombre] = df
-                st.caption(f"✅ {df.shape[0]} filas, {df.shape[1]} columnas")
-            except Exception as e:
-                st.error(f"No se pudo leer '{nombre}': {e}")
 
-        else:
+
+
+    if tipo == "csv":
+        fila_sugerida = detectar_fila_encabezado(info["bytes"], True)
+        fila = st.number_input(
+            "Fila donde comienza el encabezado real (0 = primera fila)",
+            min_value=0, max_value=50, value=int(fila_sugerida), key=f"fila_{nombre}"
+        )
+        try:
+            df = leer_sub_dataset(nombre, info, None, fila)
+            df = limpiar_encabezados(df)
+            df = df.loc[:, ~df.columns.astype(str).str.match(r"^Unnamed")]
+            nuevos_datasets[nombre] = df
+            st.caption(f"✅ {df.shape[0]} filas, {df.shape[1]} columnas")
+        except Exception as e:
+            st.error(f"No se pudo leer '{nombre}': {e}")
+    else:
             sub_opciones = obtener_sub_opciones(nombre, info)
 
             if not sub_opciones:
@@ -985,6 +1091,9 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
             )
             total = datos_filtrados[columna_indicador].sum()
             promedio = datos_filtrados[columna_indicador].mean()
+            minimo = datos_filtrados[columna_indicador].min()
+            maximo = datos_filtrados[columna_indicador].max()
+            mediana = datos_filtrados[columna_indicador].median()
             registros = len(datos_filtrados)
 
             c1, c2, c3 = st.columns(3)
@@ -992,10 +1101,21 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
             c2.metric("Promedio", f"{promedio:,.2f}")
             c3.metric("Registros", registros)
 
+            c4, c5, c6 = st.columns(3)
+            c4.metric("Mínimo", f"{minimo:,.2f}")
+            c5.metric("Máximo", f"{maximo:,.2f}")
+            c6.metric("Mediana", f"{mediana:,.2f}")
+
+
+
+
             kpis_dataset = {
                 "Columna analizada": columna_indicador,
                 "Total": f"{total:,.2f}",
                 "Promedio": f"{promedio:,.2f}",
+                "Mínimo": f"{minimo:,.2f}",
+                "Máximo": f"{maximo:,.2f}",
+                "Mediana": f"{mediana:,.2f}",
                 "Registros": registros,
             }
         else:
