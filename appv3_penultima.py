@@ -525,17 +525,10 @@ def _dibujar_grafico_pdf(pdf: "FPDF", titulo: str, img_bytes: bytes):
         pdf.cell(0, 8, "(No fue posible incrustar este gráfico)", ln=True)
 
 
-def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin_dataset: list | None = None) -> bytes:
+def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin_dataset: list | None = None, notas: str = "") -> bytes:
     """
-    Genera un PDF con, para CADA dataset incluido en el reporte:
-    sus KPIs, la TABLA COMPLETA de datos filtrados (paginada, sin límite de filas) y,
-    justo después de la tabla, el/los gráfico(s) que usan ese dataset (cada uno en su
-    propia página, para que se vea grande y legible).
-
-    datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
-    imagenes_por_dataset: {nombre_dataset: [(titulo, bytes_png), ...]}
-    imagenes_sin_dataset: gráficos "huérfanos" (caso excepcional, por si su dataset ya no
-        está entre los seleccionados); se agregan al final para no perderlos.
+    Genera un PDF con los KPIs, TABLA COMPLETA de datos filtrados y gráficos.
+    También incorpora las notas al inicio si están disponibles.
     """
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
@@ -545,6 +538,14 @@ def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 6, f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True)
     pdf.ln(2)
+
+    # Inyección de las notas/comentarios si el usuario las agregó
+    if notas:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, "Notas y Comentarios:", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 6, notas)
+        pdf.ln(4)
 
     for nombre_dataset, contenido in datasets_reporte.items():
         df = contenido["df"]
@@ -597,19 +598,20 @@ def _nombre_hoja_valido(nombre: str, usados: set) -> str:
     return candidato
 
 
-def generar_excel(datasets_reporte: dict, imagenes_graficos: list) -> bytes:
+def generar_excel(datasets_reporte: dict, imagenes_graficos: list, notas: str = "") -> bytes:
     """
-    Genera un Excel con UNA HOJA POR CADA dataset incluido en el reporte (datos filtrados),
-    una hoja "Indicadores" combinada y una hoja "Graficos" con los gráficos incrustados,
-    cada uno con un tamaño fijo y suficiente espacio vertical para que no se superpongan.
-
-    datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
-    imagenes_graficos: [(titulo, bytes_png, nombre_dataset), ...]
+    Genera un Excel con los datasets, hoja de Notas, y gráficos incrustados.
     """
     buffer = BytesIO()
     nombres_hoja_usados = set()
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        
+        # Pestaña de Notas (se coloca al principio si existe)
+        if notas:
+            df_notas = pd.DataFrame({"Notas / Comentarios del Reporte": [notas]})
+            df_notas.to_excel(writer, sheet_name="Notas", index=False)
+
         filas_kpis = []
         for nombre_dataset, contenido in datasets_reporte.items():
             hoja = _nombre_hoja_valido(nombre_dataset, nombres_hoja_usados)
@@ -629,8 +631,7 @@ def generar_excel(datasets_reporte: dict, imagenes_graficos: list) -> bytes:
                 hoja_graficos.cell(row=fila_actual, column=1, value=titulo)
                 try:
                     img = OpenpyxlImage(BytesIO(img_bytes))
-                    # Tamaño fijo para que todos los gráficos se vean parejos y no
-                    # se superpongan entre sí (antes se insertaban a tamaño original).
+                    # Tamaño fijo para que todos los gráficos se vean parejos y no se superpongan
                     img.width = ANCHO_IMG_EXCEL
                     img.height = ALTO_IMG_EXCEL
                     hoja_graficos.add_image(img, f"A{fila_actual + 1}")
@@ -1116,21 +1117,30 @@ for titulo, img_bytes, nombre_dataset_grafico in imagenes_graficos:
 
 st.subheader("5. Exportar Reporte")
 
-st.caption(
-    "El reporte combina los datos FILTRADOS de los datasets elegidos en el paso 3: "
-    + ", ".join(datasets_seleccionados)
-)
+# 1. Resumen de la exportación
+total_filas = sum(len(c["df"]) for c in resultados_por_dataset.values())
+num_datasets = len(resultados_por_dataset)
+num_graficos = len(imagenes_graficos)
 
-col_excel, col_csv, col_pdf = st.columns(3)
+st.success(f"📋 **Resumen de Exportación:** Vas a exportar **{num_datasets}** dataset(s), **{total_filas}** filas en total y **{num_graficos}** gráfico(s).")
+
+# 2. Agregar Notas y Comentarios
+notas_reporte = st.text_area("📝 Notas o comentarios adicionales (se incluirán en el PDF y en el Excel global)", placeholder="Escribe aquí observaciones generales para el reporte...")
+
+# 3. Reporte Completo (Excel y PDF)
+st.markdown("### Descargar Reporte Completo (Todos los datasets)")
+col_excel, col_pdf = st.columns(2)
 
 with col_excel:
     try:
-        buffer_excel = generar_excel(resultados_por_dataset, imagenes_graficos)
+        # Se le pasa 'notas_reporte' a generar_excel
+        buffer_excel = generar_excel(resultados_por_dataset, imagenes_graficos, notas=notas_reporte)
         st.download_button(
-            label="📥 Descargar Excel",
+            label="📥 Descargar Reporte Global en Excel",
             data=buffer_excel,
-            file_name="Reporte.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            file_name="Reporte_Global.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
         )
         st.caption(f"Una hoja por dataset ({len(resultados_por_dataset)}).")
         if imagenes_graficos:
@@ -1138,41 +1148,65 @@ with col_excel:
     except Exception as e:
         st.error(f"No fue posible generar el Excel: {e}")
 
-with col_csv:
-    st.caption("El CSV no admite varias tablas: descargue un archivo por dataset.")
-    for nombre_ds in datasets_seleccionados:
-        df_export = resultados_por_dataset[nombre_ds]["df"]
-        try:
-            buffer_csv = df_export.to_csv(index=False).encode("utf-8-sig")
-            nombre_archivo = "Reporte_" + "".join(c for c in nombre_ds if c.isalnum())[:40] + ".csv"
-            st.download_button(
-                label=f"📥 CSV: {nombre_ds}",
-                data=buffer_csv,
-                file_name=nombre_archivo,
-                mime="text/csv",
-                key=f"csv_{nombre_ds}",
-            )
-        except Exception as e:
-            st.error(f"No fue posible generar el CSV de '{nombre_ds}': {e}")
-
 with col_pdf:
     if not FPDF_DISPONIBLE:
         st.caption("Para exportar a PDF instale la librería: pip install fpdf2")
     else:
         try:
-            pdf_bytes = generar_pdf(resultados_por_dataset, imagenes_por_dataset, imagenes_sin_dataset)
+            # Se le pasa 'notas_reporte' a generar_pdf
+            pdf_bytes = generar_pdf(resultados_por_dataset, imagenes_por_dataset, imagenes_sin_dataset, notas=notas_reporte)
             st.download_button(
-                label="📥 Descargar PDF",
+                label="📥 Descargar Reporte Global en PDF",
                 data=pdf_bytes,
-                file_name="Reporte.pdf",
-                mime="application/pdf"
+                file_name="Reporte_Global.pdf",
+                mime="application/pdf",
+                use_container_width=True
             )
-            total_registros = sum(len(c["df"]) for c in resultados_por_dataset.values())
-            st.caption(f"Incluye {total_registros} registro(s) en total (todas las filas, paginado automático).")
+            st.caption(f"Incluye {total_filas} registro(s) en total (todas las filas, paginado automático).")
             if imagenes_graficos:
                 st.caption(f"Incluye {len(imagenes_graficos)} gráfico(s), cada uno justo después de la tabla de su dataset.")
         except Exception as e:
             st.error(f"No fue posible generar el PDF: {e}")
+
+st.divider()
+
+# 4. Descargas Individuales (CSV y Excel para un solo dataset)
+st.markdown("### Descargas Individuales (Por Dataset)")
+st.caption("Puede descargar los datos filtrados de un dataset específico tanto en formato CSV como en Excel.")
+
+for nombre_ds in datasets_seleccionados:
+    df_export = resultados_por_dataset[nombre_ds]["df"]
+    
+    # Preparar el archivo CSV
+    buffer_csv = df_export.to_csv(index=False).encode("utf-8-sig")
+    nombre_archivo_base = "".join(c for c in nombre_ds if c.isalnum())[:40]
+    
+    # Preparar el archivo Excel del dataset individual
+    buffer_excel_individual = BytesIO()
+    with pd.ExcelWriter(buffer_excel_individual, engine="openpyxl") as writer:
+        df_export.to_excel(writer, sheet_name="Datos", index=False)
+    buffer_excel_individual_bytes = buffer_excel_individual.getvalue()
+
+    with st.expander(f"Descargar: {nombre_ds} ({len(df_export)} filas)"):
+        c_csv, c_xls = st.columns(2)
+        with c_csv:
+            st.download_button(
+                label=f"📥 CSV ({nombre_ds})",
+                data=buffer_csv,
+                file_name=f"Dataset_{nombre_archivo_base}.csv",
+                mime="text/csv",
+                key=f"csv_btn_{nombre_ds}",
+                use_container_width=True
+            )
+        with c_xls:
+            st.download_button(
+                label=f"📥 Excel ({nombre_ds})",
+                data=buffer_excel_individual_bytes,
+                file_name=f"Dataset_{nombre_archivo_base}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"xls_btn_{nombre_ds}",
+                use_container_width=True
+            )
 
 # Guardar la sesión al final de cada ejecución (archivos, gráficos, selección de datasets)
 guardar_sesion()

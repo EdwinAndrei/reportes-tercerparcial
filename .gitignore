@@ -1,1 +1,14 @@
 .cache_reportes
+
+venv/
+.venv/
+
+
+__pycache__/
+*.pyc
+
+
+.vscode/
+
+
+.env
