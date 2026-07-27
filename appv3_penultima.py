@@ -313,6 +313,23 @@ def validar_calidad_datos(df: pd.DataFrame) -> list:
 
     return advertencias
 
+def limpiar_filtros_dataset(nombre_ds: str):
+    """
+    Borra del estado de sesión todos los widgets de filtro de este dataset
+    (categóricos, fecha, rango numérico, búsqueda de texto, columnas ocultas)
+    para que vuelvan a su valor por defecto.
+    """
+    prefijos = (
+        f"filtro_{nombre_ds}_",
+        f"fecha_{nombre_ds}_",
+        f"rango_num_{nombre_ds}_",
+        f"busqueda_col_{nombre_ds}",
+        f"busqueda_texto_{nombre_ds}",
+        f"ocultar_cols_{nombre_ds}",
+    )
+    claves_a_borrar = [k for k in st.session_state.keys() if k.startswith(prefijos)]
+    for k in claves_a_borrar:
+        del st.session_state[k]
 
 # ====================================
 # LECTORES MULTI-FORMATO (Excel, CSV, Word, PDF, SQLite)
@@ -802,8 +819,56 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
         st.markdown("**Vista previa**")
         st.dataframe(datos, use_container_width=True)
 
+        def _resetear_filtros_callback(nombre_ds=nombre_ds, datos=datos):
+            columnas_categoricas_r = [
+                c for c in datos.columns
+                if (pd.api.types.is_object_dtype(datos[c]) or pd.api.types.is_string_dtype(datos[c]) or str(datos[c].dtype) == "category")
+                and datos[c].nunique(dropna=True) <= 50
+            ]
+            for col in columnas_categoricas_r:
+                valores = sorted(datos[col].dropna().unique().tolist())
+                st.session_state[f"filtro_{nombre_ds}_{col}"] = valores
+
+            columnas_fecha_r = [c for c in datos.columns if pd.api.types.is_datetime64_any_dtype(datos[c])]
+            for col in columnas_fecha_r:
+                col_valida = datos[col].dropna()
+                if col_valida.empty:
+                    continue
+                fmin, fmax = col_valida.min().date(), col_valida.max().date()
+                if fmin == fmax:
+                    continue
+                st.session_state[f"fecha_{nombre_ds}_{col}"] = (fmin, fmax)
+
+            columnas_numericas_r = datos.select_dtypes(include="number").columns.tolist()
+            for col in columnas_numericas_r:
+                col_valida = datos[col].dropna()
+                if col_valida.empty:
+                    continue
+                rmin, rmax = int(col_valida.min()), int(col_valida.max())
+                if rmin == rmax:
+                    continue
+                st.session_state[f"rango_num_{nombre_ds}_{col}"] = (rmin, rmax)
+
+            columnas_texto_r = [
+                c for c in datos.columns
+                if pd.api.types.is_object_dtype(datos[c]) or pd.api.types.is_string_dtype(datos[c]) or str(datos[c].dtype) == "category"
+            ]
+            if columnas_texto_r:
+                st.session_state[f"busqueda_col_{nombre_ds}"] = columnas_texto_r[0]
+            st.session_state[f"busqueda_texto_{nombre_ds}"] = ""
+            st.session_state[f"ocultar_cols_{nombre_ds}"] = []
+
         # --- Filtros propios de este dataset ---
-        st.markdown("**Filtros**")
+        col_titulo_filtros, col_boton_reset = st.columns([4, 1])
+        with col_titulo_filtros:
+            st.markdown("**Filtros**")
+        with col_boton_reset:
+            st.button(
+                "🧹 Quitar todos los filtros",
+                key=f"reset_{nombre_ds}",
+                on_click=_resetear_filtros_callback,
+            )
+
         datos_filtrados = datos.copy()
 
         columnas_categoricas = [
@@ -843,8 +908,60 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
                     (datos_filtrados[col].dt.date >= rango[0]) & (datos_filtrados[col].dt.date <= rango[1])
                 ]
 
+        # Filtro por rango numérico
+        columnas_numericas_filtro = datos.select_dtypes(include="number").columns.tolist()
+        if columnas_numericas_filtro:
+            with st.expander("Filtrar por rango numérico"):
+                columnas_rango_ui = st.columns(min(3, len(columnas_numericas_filtro)))
+                for i, col in enumerate(columnas_numericas_filtro):
+                    col_valida = datos[col].dropna()
+                    if col_valida.empty:
+                        continue
+                    minimo, maximo = int(col_valida.min()), int(col_valida.max())
+                    if minimo == maximo:
+                        continue
+                    with columnas_rango_ui[i % len(columnas_rango_ui)]:
+                        rango_num = st.slider(
+                            f"{col}", min_value=minimo, max_value=maximo,
+                            value=(minimo, maximo), key=f"rango_num_{nombre_ds}_{col}"
+                        )
+                    datos_filtrados = datos_filtrados[
+                        (datos_filtrados[col] >= rango_num[0]) & (datos_filtrados[col] <= rango_num[1])
+                    ]
+
+        # Búsqueda de una palabra dentro de una columna
+        columnas_texto_busqueda = [
+            c for c in datos.columns
+            if datos[c].dtype == "object" or str(datos[c].dtype) == "category"
+        ]
+        if columnas_texto_busqueda:
+            with st.expander("Buscar palabra en una columna"):
+                col_busq_1, col_busq_2 = st.columns(2)
+                with col_busq_1:
+                    columna_busqueda = st.selectbox(
+                        "Columna", columnas_texto_busqueda, key=f"busqueda_col_{nombre_ds}"
+                    )
+                with col_busq_2:
+                    texto_busqueda = st.text_input(
+                        "Palabra o texto a buscar", key=f"busqueda_texto_{nombre_ds}"
+                    )
+                if texto_busqueda:
+                    datos_filtrados = datos_filtrados[
+                        datos_filtrados[columna_busqueda]
+                        .astype(str)
+                        .str.contains(texto_busqueda, case=False, na=False)
+                    ]
+
         if datos_filtrados.empty:
             st.warning("Los filtros seleccionados no arrojan ningún registro para este dataset.")
+
+        # Ocultar columnas
+        columnas_a_ocultar = st.multiselect(
+            "Ocultar columnas (no se muestran ni se incluyen en la tabla/reporte de este dataset)",
+            datos.columns.tolist(), default=[], key=f"ocultar_cols_{nombre_ds}"
+        )
+        if columnas_a_ocultar:
+            datos_filtrados = datos_filtrados.drop(columns=columnas_a_ocultar)
 
         # --- Indicadores propios de este dataset ---
         st.markdown("**Indicadores**")
