@@ -15,6 +15,12 @@ Requisitos Mínimos
 
 Guía de Uso Paso a Paso
 
+Pasos de instalación y ejecución
+1.	Instalar Python 3.10+ desde https://www.python.org/downloads/ (marcar 'Add Python to PATH').
+2.	Descargar o clonar el repositorio del proyecto en una carpeta local.
+3.	Abrir una terminal (CMD, PowerShell o Bash) en la carpeta del proyecto.
+4.	Ejecutar: pip install -r requirements.txt
+
 Cómo Iniciar la Aplicación
 
 A diferencia de una aplicación de escritorio tradicional, este sistema no requiere un inicio de sesión con usuario y contraseña; el acceso se realiza ejecutando el servidor local de Streamlit. Los pasos son los siguientes:
@@ -24,6 +30,7 @@ A diferencia de una aplicación de escritorio tradicional, este sistema no requi
 4.	La aplicación se abrirá automáticamente en el navegador; si no ocurre, copiar y pegar la dirección manualmente.
 
 Cómo Usar las Funciones Principales
+
 
 1. Cargar archivos.
 En la sección “1. Cargar archivos”, seleccione uno o varios archivos en los formatos admitidos. Puede arrastrarlos directamente o usar el explorador de archivos.
