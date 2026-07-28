@@ -1076,11 +1076,11 @@ else:
                 "eje_x": eje_x_nuevo,
                 "eje_y": eje_y_nuevo,
                 "tipo": tipo_nuevo,
-                # ---- Campos agregados por Persona 3 ----
+                # ---- Campos agregados por Alanis ----
                 "titulo": titulo_nuevo.strip(),
                 "orden": orden_nuevo,
                 "paleta": paleta_nueva,
-                # ---- fin campos Persona 3 ----
+                # ---- fin campos Alanis ----
             })
             guardar_sesion()
             st.rerun()
