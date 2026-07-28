@@ -571,6 +571,18 @@ def leer_sub_dataset(nombre: str, info: dict, etiqueta, fila_encabezado: int = 0
 
 PALETA_COLORES = px.colors.qualitative.Plotly  # paleta de colores explícita para forzar color en la exportación
 
+# ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+# Paletas de colores seleccionables por el usuario para cada gráfico
+PALETAS_DISPONIBLES = {
+    "Plotly (predeterminada)": px.colors.qualitative.Plotly,
+    "Pastel": px.colors.qualitative.Pastel,
+    "Vivid": px.colors.qualitative.Vivid,
+    "Set2": px.colors.qualitative.Set2,
+    "Bold": px.colors.qualitative.Bold,
+    "Safe": px.colors.qualitative.Safe,
+}
+# ============ FIN CAMBIOS ALANIS ============
+
 # Tamaño de embebido de cada gráfico en la hoja "Graficos" del Excel (en píxeles).
 # Se fija explícitamente para que las imágenes no se dibujen "a tamaño completo" (lo que
 # provocaba que unas taparan a otras); a partir de este tamaño se calcula cuántas filas
@@ -648,17 +660,10 @@ def _dibujar_grafico_pdf(pdf: "FPDF", titulo: str, img_bytes: bytes):
         pdf.cell(0, 8, "(No fue posible incrustar este gráfico)", ln=True)
 
 
-def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin_dataset: list | None = None) -> bytes:
+def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin_dataset: list | None = None, notas: str = "") -> bytes:
     """
-    Genera un PDF con, para CADA dataset incluido en el reporte:
-    sus KPIs, la TABLA COMPLETA de datos filtrados (paginada, sin límite de filas) y,
-    justo después de la tabla, el/los gráfico(s) que usan ese dataset (cada uno en su
-    propia página, para que se vea grande y legible).
-
-    datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
-    imagenes_por_dataset: {nombre_dataset: [(titulo, bytes_png), ...]}
-    imagenes_sin_dataset: gráficos "huérfanos" (caso excepcional, por si su dataset ya no
-        está entre los seleccionados); se agregan al final para no perderlos.
+    Genera un PDF con los KPIs, TABLA COMPLETA de datos filtrados y gráficos.
+    También incorpora las notas al inicio si están disponibles.
     """
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
@@ -668,6 +673,14 @@ def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 6, f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True)
     pdf.ln(2)
+
+    # Inyección de las notas/comentarios si el usuario las agregó
+    if notas:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, "Notas y Comentarios:", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 6, notas)
+        pdf.ln(4)
 
     for nombre_dataset, contenido in datasets_reporte.items():
         df = contenido["df"]
@@ -720,19 +733,20 @@ def _nombre_hoja_valido(nombre: str, usados: set) -> str:
     return candidato
 
 
-def generar_excel(datasets_reporte: dict, imagenes_graficos: list) -> bytes:
+def generar_excel(datasets_reporte: dict, imagenes_graficos: list, notas: str = "") -> bytes:
     """
-    Genera un Excel con UNA HOJA POR CADA dataset incluido en el reporte (datos filtrados),
-    una hoja "Indicadores" combinada y una hoja "Graficos" con los gráficos incrustados,
-    cada uno con un tamaño fijo y suficiente espacio vertical para que no se superpongan.
-
-    datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
-    imagenes_graficos: [(titulo, bytes_png, nombre_dataset), ...]
+    Genera un Excel con los datasets, hoja de Notas, y gráficos incrustados.
     """
     buffer = BytesIO()
     nombres_hoja_usados = set()
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+
+        # Pestaña de Notas (se coloca al principio si existe)
+        if notas:
+            df_notas = pd.DataFrame({"Notas / Comentarios del Reporte": [notas]})
+            df_notas.to_excel(writer, sheet_name="Notas", index=False)
+
         filas_kpis = []
         for nombre_dataset, contenido in datasets_reporte.items():
             hoja = _nombre_hoja_valido(nombre_dataset, nombres_hoja_usados)
@@ -752,8 +766,7 @@ def generar_excel(datasets_reporte: dict, imagenes_graficos: list) -> bytes:
                 hoja_graficos.cell(row=fila_actual, column=1, value=titulo)
                 try:
                     img = OpenpyxlImage(BytesIO(img_bytes))
-                    # Tamaño fijo para que todos los gráficos se vean parejos y no
-                    # se superpongan entre sí (antes se insertaban a tamaño original).
+                    # Tamaño fijo para que todos los gráficos se vean parejos y no se superpongan
                     img.width = ANCHO_IMG_EXCEL
                     img.height = ALTO_IMG_EXCEL
                     hoja_graficos.add_image(img, f"A{fila_actual + 1}")
@@ -1034,6 +1047,27 @@ else:
             eje_y_nuevo = st.selectbox("Eje Y (numérico)", columnas_num_grafico, key="nuevo_eje_y")
         with col_tipo:
             tipo_nuevo = st.selectbox("Tipo de gráfico", ["Barras", "Pastel", "Líneas", "Dispersión"], key="nuevo_tipo")
+        # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+        titulo_nuevo = st.text_input(
+            "Título del gráfico (opcional — si se deja vacío se genera uno automático)",
+            key="nuevo_titulo",
+        )
+
+        col_orden, col_paleta = st.columns(2)
+        with col_orden:
+            orden_nuevo = st.selectbox(
+                "Orden de los datos",
+                ["Sin ordenar", "Mayor a menor", "Menor a mayor"],
+                key="nuevo_orden",
+            )
+        with col_paleta:
+            paleta_nueva = st.selectbox(
+                "Paleta de colores",
+                list(PALETAS_DISPONIBLES.keys()),
+                key="nueva_paleta",
+            )
+        # ============ FIN CAMBIOS ALANIS ============
+
         agregar = st.form_submit_button("➕ Agregar gráfico")
         if agregar:
             st.session_state.graficos.append({
@@ -1042,6 +1076,11 @@ else:
                 "eje_x": eje_x_nuevo,
                 "eje_y": eje_y_nuevo,
                 "tipo": tipo_nuevo,
+                # ---- Campos agregados por Persona 3 ----
+                "titulo": titulo_nuevo.strip(),
+                "orden": orden_nuevo,
+                "paleta": paleta_nueva,
+                # ---- fin campos Persona 3 ----
             })
             guardar_sesion()
             st.rerun()
@@ -1067,6 +1106,15 @@ else:
             st.info(f"'{g['dataset']}' no tiene registros con los filtros actuales; este gráfico se omite.")
             continue
 
+        # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+        # Valores con .get() para no romper gráficos guardados de sesiones anteriores
+        # a esta actualización (que no tenían título/orden/paleta propios).
+        titulo_personalizado = (g.get("titulo") or "").strip()
+        orden_grafico = g.get("orden", "Sin ordenar")
+        nombre_paleta = g.get("paleta", "Plotly (predeterminada)")
+        paleta_grafico = PALETAS_DISPONIBLES.get(nombre_paleta, PALETA_COLORES)
+        # ============ FIN CAMBIOS ALANIS ============
+
         st.markdown(f"**{g['tipo']}** — {g['eje_y']} por {g['eje_x']}  _(dataset: {g['dataset']}, datos filtrados)_")
 
         try:
@@ -1078,26 +1126,50 @@ else:
                 resumen = df_g.groupby(g["eje_x"])[g["eje_y"]].sum().reset_index()
                 col_valor = g["eje_y"]
 
-            color_principal = PALETA_COLORES[indice_color % len(PALETA_COLORES)]
+            # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+            if orden_grafico == "Mayor a menor":
+                resumen = resumen.sort_values(by=col_valor, ascending=False)
+            elif orden_grafico == "Menor a mayor":
+                resumen = resumen.sort_values(by=col_valor, ascending=True)
+
+            color_principal = paleta_grafico[indice_color % len(paleta_grafico)]  # antes: PALETA_COLORES fijo
+            titulo_auto = f"{col_valor} por {g['eje_x']}"
+            titulo_final = titulo_personalizado if titulo_personalizado else titulo_auto
+            # ============ FIN CAMBIOS ALANIS ============
 
             if g["tipo"] == "Barras":
                 fig = px.bar(
-                    resumen, x=g["eje_x"], y=col_valor, title=f"{col_valor} por {g['eje_x']}",
-                    color=g["eje_x"], color_discrete_sequence=PALETA_COLORES,
+                    resumen, x=g["eje_x"], y=col_valor,
+                    title=titulo_final,  # CAMBIO ALANIS: antes f"{col_valor} por {g['eje_x']}" fijo
+                    color=g["eje_x"],
+                    color_discrete_sequence=paleta_grafico,  # CAMBIO ALANIS: antes PALETA_COLORES fijo
                 )
+                # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+                if orden_grafico != "Sin ordenar":
+                    fig.update_xaxes(categoryorder="array", categoryarray=resumen[g["eje_x"]].tolist())
+                # ============ FIN CAMBIOS ALANIS ============
             elif g["tipo"] == "Pastel":
+                titulo_pastel = titulo_personalizado if titulo_personalizado else f"Distribución de {col_valor}"  # CAMBIO ALANIS
                 fig = px.pie(
-                    resumen, names=g["eje_x"], values=col_valor, title=f"Distribución de {col_valor}",
-                    color_discrete_sequence=PALETA_COLORES,
+                    resumen, names=g["eje_x"], values=col_valor,
+                    title=titulo_pastel,  # CAMBIO ALANIS: antes f"Distribución de {col_valor}" fijo
+                    color_discrete_sequence=paleta_grafico,  # CAMBIO ALANIS: antes PALETA_COLORES fijo
                 )
             elif g["tipo"] == "Líneas":
                 fig = px.line(
-                    resumen, x=g["eje_x"], y=col_valor, title=f"{col_valor} por {g['eje_x']}",
+                    resumen, x=g["eje_x"], y=col_valor,
+                    title=titulo_final,  # CAMBIO ALANIS: antes f"{col_valor} por {g['eje_x']}" fijo
                     markers=True, color_discrete_sequence=[color_principal],
                 )
+                # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+                if orden_grafico != "Sin ordenar":
+                    fig.update_xaxes(categoryorder="array", categoryarray=resumen[g["eje_x"]].tolist())
+                # ============ FIN CAMBIOS ALANIS ============
             else:
+                titulo_dispersion = titulo_personalizado if titulo_personalizado else f"{g['eje_y']} vs {g['eje_x']}"  # CAMBIO ALANIS
                 fig = px.scatter(
-                    df_g, x=g["eje_x"], y=g["eje_y"], title=f"{g['eje_y']} vs {g['eje_x']}",
+                    df_g, x=g["eje_x"], y=g["eje_y"],
+                    title=titulo_dispersion,  # CAMBIO ALANIS: antes f"{g['eje_y']} vs {g['eje_x']}" fijo
                     color_discrete_sequence=[color_principal],
                 )
 
@@ -1105,16 +1177,32 @@ else:
 
             imagen_png = fig_a_imagen_png(fig)
             if imagen_png:
-                titulo_grafico = f"{g['tipo']} - {col_valor} por {g['eje_x']} ({g['dataset']})"
+                # CAMBIO ALANIS: se usa el título personalizado si existe, si no el formato original
+                titulo_grafico = f"{titulo_final} ({g['dataset']})" if titulo_personalizado else f"{g['tipo']} - {col_valor} por {g['eje_x']} ({g['dataset']})"
                 imagenes_graficos.append((titulo_grafico, imagen_png, g["dataset"]))
 
         except Exception as e:
             st.error(f"No fue posible generar este gráfico: {e}")
 
-        if st.button("🗑️ Eliminar este gráfico", key=f"del_{g['id']}"):
-            st.session_state.graficos = [x for x in st.session_state.graficos if x["id"] != g["id"]]
-            guardar_sesion()
-            st.rerun()
+        # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+        # Antes solo existía el botón "Eliminar"; se agregó una columna con el botón "Duplicar"
+        col_dup, col_del = st.columns(2)
+        with col_dup:
+            if st.button("📋 Duplicar este gráfico", key=f"dup_{g['id']}"):
+                nuevo_grafico = dict(g)
+                nuevo_grafico["id"] = f"g{len(st.session_state.graficos)}_{datetime.now().timestamp()}"
+                nombre_base = titulo_personalizado if titulo_personalizado else f"{g['tipo']} - {g['eje_y']} por {g['eje_x']}"
+                nuevo_grafico["titulo"] = f"{nombre_base} (copia)"
+                st.session_state.graficos.append(nuevo_grafico)
+                guardar_sesion()
+                st.rerun()
+        with col_del:
+            # ---- Botón original de eliminar (solo se movió dentro de la columna col_del) ----
+            if st.button("🗑️ Eliminar este gráfico", key=f"del_{g['id']}"):
+                st.session_state.graficos = [x for x in st.session_state.graficos if x["id"] != g["id"]]
+                guardar_sesion()
+                st.rerun()
+        # ============ FIN CAMBIOS ALANIS ============
 
         st.divider()
 
@@ -1139,21 +1227,30 @@ for titulo, img_bytes, nombre_dataset_grafico in imagenes_graficos:
 
 st.subheader("5. Exportar Reporte")
 
-st.caption(
-    "El reporte combina los datos FILTRADOS de los datasets elegidos en el paso 3: "
-    + ", ".join(datasets_seleccionados)
-)
+# 1. Resumen de la exportación
+total_filas = sum(len(c["df"]) for c in resultados_por_dataset.values())
+num_datasets = len(resultados_por_dataset)
+num_graficos = len(imagenes_graficos)
 
-col_excel, col_csv, col_pdf = st.columns(3)
+st.success(f"📋 **Resumen de Exportación:** Vas a exportar **{num_datasets}** dataset(s), **{total_filas}** filas en total y **{num_graficos}** gráfico(s).")
+
+# 2. Agregar Notas y Comentarios
+notas_reporte = st.text_area("📝 Notas o comentarios adicionales (se incluirán en el PDF y en el Excel global)", placeholder="Escribe aquí observaciones generales para el reporte...")
+
+# 3. Reporte Completo (Excel y PDF)
+st.markdown("### Descargar Reporte Completo (Todos los datasets)")
+col_excel, col_pdf = st.columns(2)
 
 with col_excel:
     try:
-        buffer_excel = generar_excel(resultados_por_dataset, imagenes_graficos)
+        # Se le pasa 'notas_reporte' a generar_excel
+        buffer_excel = generar_excel(resultados_por_dataset, imagenes_graficos, notas=notas_reporte)
         st.download_button(
-            label="📥 Descargar Excel",
+            label="📥 Descargar Reporte Global en Excel",
             data=buffer_excel,
-            file_name="Reporte.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            file_name="Reporte_Global.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
         )
         st.caption(f"Una hoja por dataset ({len(resultados_por_dataset)}).")
         if imagenes_graficos:
@@ -1161,41 +1258,65 @@ with col_excel:
     except Exception as e:
         st.error(f"No fue posible generar el Excel: {e}")
 
-with col_csv:
-    st.caption("El CSV no admite varias tablas: descargue un archivo por dataset.")
-    for nombre_ds in datasets_seleccionados:
-        df_export = resultados_por_dataset[nombre_ds]["df"]
-        try:
-            buffer_csv = df_export.to_csv(index=False).encode("utf-8-sig")
-            nombre_archivo = "Reporte_" + "".join(c for c in nombre_ds if c.isalnum())[:40] + ".csv"
-            st.download_button(
-                label=f"📥 CSV: {nombre_ds}",
-                data=buffer_csv,
-                file_name=nombre_archivo,
-                mime="text/csv",
-                key=f"csv_{nombre_ds}",
-            )
-        except Exception as e:
-            st.error(f"No fue posible generar el CSV de '{nombre_ds}': {e}")
-
 with col_pdf:
     if not FPDF_DISPONIBLE:
         st.caption("Para exportar a PDF instale la librería: pip install fpdf2")
     else:
         try:
-            pdf_bytes = generar_pdf(resultados_por_dataset, imagenes_por_dataset, imagenes_sin_dataset)
+            # Se le pasa 'notas_reporte' a generar_pdf
+            pdf_bytes = generar_pdf(resultados_por_dataset, imagenes_por_dataset, imagenes_sin_dataset, notas=notas_reporte)
             st.download_button(
-                label="📥 Descargar PDF",
+                label="📥 Descargar Reporte Global en PDF",
                 data=pdf_bytes,
-                file_name="Reporte.pdf",
-                mime="application/pdf"
+                file_name="Reporte_Global.pdf",
+                mime="application/pdf",
+                use_container_width=True
             )
-            total_registros = sum(len(c["df"]) for c in resultados_por_dataset.values())
-            st.caption(f"Incluye {total_registros} registro(s) en total (todas las filas, paginado automático).")
+            st.caption(f"Incluye {total_filas} registro(s) en total (todas las filas, paginado automático).")
             if imagenes_graficos:
                 st.caption(f"Incluye {len(imagenes_graficos)} gráfico(s), cada uno justo después de la tabla de su dataset.")
         except Exception as e:
             st.error(f"No fue posible generar el PDF: {e}")
+
+st.divider()
+
+# 4. Descargas Individuales (CSV y Excel para un solo dataset)
+st.markdown("### Descargas Individuales (Por Dataset)")
+st.caption("Puede descargar los datos filtrados de un dataset específico tanto en formato CSV como en Excel.")
+
+for nombre_ds in datasets_seleccionados:
+    df_export = resultados_por_dataset[nombre_ds]["df"]
+
+    # Preparar el archivo CSV
+    buffer_csv = df_export.to_csv(index=False).encode("utf-8-sig")
+    nombre_archivo_base = "".join(c for c in nombre_ds if c.isalnum())[:40]
+
+    # Preparar el archivo Excel del dataset individual
+    buffer_excel_individual = BytesIO()
+    with pd.ExcelWriter(buffer_excel_individual, engine="openpyxl") as writer:
+        df_export.to_excel(writer, sheet_name="Datos", index=False)
+    buffer_excel_individual_bytes = buffer_excel_individual.getvalue()
+
+    with st.expander(f"Descargar: {nombre_ds} ({len(df_export)} filas)"):
+        c_csv, c_xls = st.columns(2)
+        with c_csv:
+            st.download_button(
+                label=f"📥 CSV ({nombre_ds})",
+                data=buffer_csv,
+                file_name=f"Dataset_{nombre_archivo_base}.csv",
+                mime="text/csv",
+                key=f"csv_btn_{nombre_ds}",
+                use_container_width=True
+            )
+        with c_xls:
+            st.download_button(
+                label=f"📥 Excel ({nombre_ds})",
+                data=buffer_excel_individual_bytes,
+                file_name=f"Dataset_{nombre_archivo_base}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"xls_btn_{nombre_ds}",
+                use_container_width=True
+            )
 
 # Guardar la sesión al final de cada ejecución (archivos, gráficos, selección de datasets)
 guardar_sesion()

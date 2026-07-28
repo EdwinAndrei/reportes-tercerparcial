@@ -1,13 +1,54 @@
 {
   "archivos": [
     {
-      "nombre": "Dataset_casopracticoauditoriaampliadox.xlsx",
+      "nombre": "Testapp.xlsx",
       "tipo": "xlsx"
     }
   ],
-  "graficos": [],
-  "datasets_seleccionados": [
-    "Dataset_casopracticoauditoriaampliadox.xlsx [Datos]"
+  "graficos": [
+    {
+      "id": "g0_1785197509.404579",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Fecha",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "Empresa 2026",
+      "orden": "Mayor a menor",
+      "paleta": "Plotly (predeterminada)"
+    },
+    {
+      "id": "g1_1785197569.278394",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Fecha",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "Empresa 2026 (copia)",
+      "orden": "Mayor a menor",
+      "paleta": "Plotly (predeterminada)"
+    },
+    {
+      "id": "g2_1785197593.992484",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Fecha",
+      "eje_y": "Total",
+      "tipo": "Líneas",
+      "titulo": "Empresa 2026",
+      "orden": "Mayor a menor",
+      "paleta": "Bold"
+    },
+    {
+      "id": "g3_1785197605.431665",
+      "dataset": "Testapp.xlsx [Sheet1]",
+      "eje_x": "Fecha",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "Empresa 2026",
+      "orden": "Mayor a menor",
+      "paleta": "Bold"
+    }
   ],
-  "fecha": "2026-07-25 23:43:04"
+  "datasets_seleccionados": [
+    "Testapp.xlsx [Sheet1]"
+  ],
+  "fecha": "2026-07-27 18:13:32"
 }
