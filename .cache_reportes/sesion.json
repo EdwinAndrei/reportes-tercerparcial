@@ -1,54 +1,74 @@
 {
   "archivos": [
     {
-      "nombre": "Testapp.xlsx",
+      "nombre": "muchosRegistros.xlsx",
       "tipo": "xlsx"
     }
   ],
   "graficos": [
     {
-      "id": "g0_1785197509.404579",
-      "dataset": "Testapp.xlsx [Sheet1]",
-      "eje_x": "Fecha",
+      "id": "g0_1785285595.078748",
+      "dataset": "muchosRegistros.xlsx [Pagina1]",
+      "eje_x": "Producto",
       "eje_y": "Total",
-      "tipo": "Barras",
-      "titulo": "Empresa 2026",
-      "orden": "Mayor a menor",
+      "tipo": "Pastel",
+      "titulo": "EMPRESA UNICAH 2026 Reporte Total por Producto",
+      "orden": "Sin ordenar",
       "paleta": "Plotly (predeterminada)"
     },
     {
-      "id": "g1_1785197569.278394",
-      "dataset": "Testapp.xlsx [Sheet1]",
-      "eje_x": "Fecha",
+      "id": "g1_1785285606.974617",
+      "dataset": "muchosRegistros.xlsx [Pagina1]",
+      "eje_x": "Producto",
       "eje_y": "Total",
-      "tipo": "Barras",
-      "titulo": "Empresa 2026 (copia)",
-      "orden": "Mayor a menor",
-      "paleta": "Plotly (predeterminada)"
+      "tipo": "Pastel",
+      "titulo": "EMPRESA UNICAH 2026 Reporte Total por Producto",
+      "orden": "Sin ordenar",
+      "paleta": "Vivid"
     },
     {
-      "id": "g2_1785197593.992484",
-      "dataset": "Testapp.xlsx [Sheet1]",
-      "eje_x": "Fecha",
-      "eje_y": "Total",
-      "tipo": "Líneas",
-      "titulo": "Empresa 2026",
-      "orden": "Mayor a menor",
-      "paleta": "Bold"
-    },
-    {
-      "id": "g3_1785197605.431665",
-      "dataset": "Testapp.xlsx [Sheet1]",
-      "eje_x": "Fecha",
+      "id": "g2_1785285630.611862",
+      "dataset": "muchosRegistros.xlsx [Pagina1]",
+      "eje_x": "Producto",
       "eje_y": "Total",
       "tipo": "Barras",
-      "titulo": "Empresa 2026",
+      "titulo": "EMPRESA UNICAH 2026 Reporte Total por Producto",
+      "orden": "Sin ordenar",
+      "paleta": "Vivid"
+    },
+    {
+      "id": "g3_1785285642.918626",
+      "dataset": "muchosRegistros.xlsx [Pagina1]",
+      "eje_x": "Producto",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "EMPRESA UNICAH 2026 Reporte Total por Producto",
       "orden": "Mayor a menor",
-      "paleta": "Bold"
+      "paleta": "Vivid"
+    },
+    {
+      "id": "g4_1785285657.345591",
+      "dataset": "muchosRegistros.xlsx [Pagina1]",
+      "eje_x": "Producto",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "EMPRESA UNICAH 2026 Reporte Total por Producto",
+      "orden": "Menor a mayor",
+      "paleta": "Vivid"
+    },
+    {
+      "id": "g5_1785285700.279034",
+      "dataset": "muchosRegistros.xlsx [Pagina1]",
+      "eje_x": "Producto",
+      "eje_y": "Total",
+      "tipo": "Barras",
+      "titulo": "EMPRESA UNICAH 2026 Reporte Total por Producto (copia)",
+      "orden": "Menor a mayor",
+      "paleta": "Vivid"
     }
   ],
   "datasets_seleccionados": [
-    "Testapp.xlsx [Sheet1]"
+    "muchosRegistros.xlsx [Pagina1]"
   ],
-  "fecha": "2026-07-27 18:13:32"
+  "fecha": "2026-07-28 18:42:09"
 }
