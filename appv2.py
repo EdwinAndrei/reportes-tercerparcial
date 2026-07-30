@@ -11,6 +11,8 @@ from collections import defaultdict
 import json
 import sqlite3
 import shutil
+import hashlib
+import secrets
 
 # ====================================
 # DEPENDENCIAS OPCIONALES
@@ -57,6 +59,125 @@ st.set_page_config(
     layout="wide"
 )
 
+
+# ====================================
+# LOGIN (separa los datos guardados por usuario)
+# ====================================
+#
+# Este login NO maneja roles ni permisos: su único propósito es identificar
+# quién está usando la aplicación para que el autoguardado y el historial de
+# cada usuario queden completamente separados de los demás. Como la app corre
+# en línea y todos comparten el mismo servidor, sin esto el historial de un
+# usuario se mezclaría con el de otro.
+
+BASE_CACHE_DIR = Path(".cache_reportes")
+USUARIOS_FILE = BASE_CACHE_DIR / "usuarios.json"
+
+
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+
+
+def cargar_usuarios() -> dict:
+    if not USUARIOS_FILE.exists():
+        return {}
+    try:
+        return json.loads(USUARIOS_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def guardar_usuarios(usuarios: dict):
+    BASE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    USUARIOS_FILE.write_text(json.dumps(usuarios, ensure_ascii=False, indent=2))
+
+
+def nombre_usuario_valido(usuario: str) -> bool:
+    """Evita nombres de usuario que puedan usarse para 'escapar' de su propia carpeta."""
+    return bool(usuario) and all(c.isalnum() or c in ("_", "-", ".") for c in usuario)
+
+
+def crear_usuario(usuario: str, password: str) -> tuple[bool, str]:
+    usuario = usuario.strip()
+    if not usuario or not password:
+        return False, "El usuario y la contraseña no pueden estar vacíos."
+    if not nombre_usuario_valido(usuario):
+        return False, "El usuario solo puede contener letras, números, '_', '-' o '.'."
+    if len(password) < 4:
+        return False, "La contraseña debe tener al menos 4 caracteres."
+    usuarios = cargar_usuarios()
+    if usuario in usuarios:
+        return False, "Ese nombre de usuario ya existe."
+    salt = secrets.token_hex(8)
+    usuarios[usuario] = {"salt": salt, "hash": _hash_password(password, salt)}
+    guardar_usuarios(usuarios)
+    return True, "Cuenta creada correctamente. Ahora puede iniciar sesión."
+
+
+def validar_login(usuario: str, password: str) -> bool:
+    usuarios = cargar_usuarios()
+    datos = usuarios.get(usuario.strip())
+    if not datos:
+        return False
+    return _hash_password(password, datos["salt"]) == datos["hash"]
+
+
+if "usuario" not in st.session_state:
+    st.session_state.usuario = None
+
+if not st.session_state.usuario:
+    st.title("📊 Plataforma de Reportes y Análisis de Datos")
+    st.subheader("🔐 Inicie sesión para continuar")
+    st.caption(
+        "Cada usuario ve únicamente sus propios archivos guardados y su propio historial. "
+        "No es necesario un rol especial, solo un usuario y una contraseña para identificarlo."
+    )
+
+    tab_login, tab_registro = st.tabs(["Iniciar sesión", "Crear cuenta"])
+
+    with tab_login:
+        with st.form("form_login"):
+            usuario_input = st.text_input("Usuario")
+            password_input = st.text_input("Contraseña", type="password")
+            enviar = st.form_submit_button("Entrar")
+            if enviar:
+                if validar_login(usuario_input, password_input):
+                    st.session_state.usuario = usuario_input.strip()
+                    st.rerun()
+                else:
+                    st.error("Usuario o contraseña incorrectos.")
+
+    with tab_registro:
+        with st.form("form_registro"):
+            nuevo_usuario = st.text_input("Elija un nombre de usuario")
+            nueva_password = st.text_input("Elija una contraseña", type="password")
+            confirmar_password = st.text_input("Confirme la contraseña", type="password")
+            crear = st.form_submit_button("Crear cuenta")
+            if crear:
+                if nueva_password != confirmar_password:
+                    st.error("Las contraseñas no coinciden.")
+                else:
+                    ok, mensaje = crear_usuario(nuevo_usuario, nueva_password)
+                    if ok:
+                        st.success(mensaje)
+                    else:
+                        st.error(mensaje)
+
+    st.stop()
+
+usuario_actual = st.session_state.usuario
+
+# Si dentro de la misma pestaña del navegador se cambia de usuario (cerrar sesión
+# y entrar con otro), se limpia lo que estaba en memoria para que no se mezclen
+# los archivos/gráficos de un usuario con los de otro mientras se recarga desde disco.
+if st.session_state.get("_usuario_cache_previo") != usuario_actual:
+    st.session_state.archivos_originales = {}
+    st.session_state.datasets = {}
+    st.session_state.graficos = []
+    st.session_state.datasets_seleccionados = []
+    st.session_state["_usuario_cache_previo"] = usuario_actual
+
+
 st.title("📊 Plataforma de Reportes y Análisis de Datos")
 
 st.markdown("""
@@ -80,11 +201,12 @@ with st.expander("GUIA RAPIDA DE USO"):
        datasets elegidos en el paso 3** (una hoja por dataset en Excel, una sección por dataset en PDF),
        y los archivos Excel y PDF **incluyen los gráficos** generados, con **todas las filas** (no solo una muestra).
        En el PDF, el o los gráficos de cada dataset aparecen justo después de su tabla de datos filtrados.
-    7. Su sesión se guarda automáticamente. Si cierra la app, al volver a abrirla puede pulsar
-       **"Cargar última sesión"** para recuperar los archivos y gráficos en los que estaba trabajando.
-    8. Además, cada vez que presiona **"Guardar ahora"** se crea una **nueva entrada en el historial**
+    7. Su sesión se guarda automáticamente **y queda asociada a su usuario**. Si cierra la app, al volver a
+       abrirla e iniciar sesión con el mismo usuario puede pulsar **"Cargar última sesión"** para recuperar
+       los archivos y gráficos en los que estaba trabajando.
+    8. Además, cada vez que presiona **"Guardar ahora"** se crea una **nueva entrada en su historial**
        (con fecha, hora, minuto y segundo). Puede volver a cargar cualquiera de esos momentos guardados
-       desde la barra lateral, en **"Historial de guardados"**.
+       desde la barra lateral, en **"Historial de guardados"**. Cada usuario ve únicamente su propio historial.
 
     **Columnas admitidas:** cualquier nombre de columna funciona; no es necesario que se llame
     exactamente "Categoria" o "Total". El sistema detecta automáticamente columnas categóricas,
@@ -109,7 +231,7 @@ if not FPDF_DISPONIBLE or not DOCX_DISPONIBLE or not PDFPLUMBER_DISPONIBLE or no
 
 
 # ====================================
-# PERSISTENCIA DE SESIÓN
+# PERSISTENCIA DE SESIÓN (separada por usuario)
 # ====================================
 #
 # Hay dos mecanismos independientes:
@@ -122,8 +244,12 @@ if not FPDF_DISPONIBLE or not DOCX_DISPONIBLE or not PDFPLUMBER_DISPONIBLE or no
 #    sobrescribe ninguna anterior) cada vez que el usuario presiona el botón
 #    "Guardar ahora". Cada entrada queda con su fecha y hora exacta
 #    (día/mes/año hora:minuto:segundo) y puede cargarse de forma independiente.
+#
+# Ambos mecanismos viven dentro de una carpeta exclusiva del usuario que inició
+# sesión (BASE_CACHE_DIR/usuarios_datos/<usuario>/...), de modo que lo que un
+# usuario guarda o borra nunca afecta a los demás.
 
-CACHE_DIR = Path(".cache_reportes")
+CACHE_DIR = BASE_CACHE_DIR / "usuarios_datos" / usuario_actual
 CACHE_ARCHIVOS_DIR = CACHE_DIR / "archivos"
 META_PATH = CACHE_DIR / "sesion.json"
 
@@ -135,7 +261,7 @@ def hay_sesion_guardada() -> bool:
 
 
 def guardar_sesion():
-    """Autoguardado: sobrescribe la 'última sesión' con el estado actual."""
+    """Autoguardado: sobrescribe la 'última sesión' del usuario actual con el estado actual."""
     try:
         CACHE_ARCHIVOS_DIR.mkdir(parents=True, exist_ok=True)
         for nombre, info in st.session_state.archivos_originales.items():
@@ -158,7 +284,7 @@ def guardar_sesion():
 
 
 def cargar_sesion():
-    """Carga la 'última sesión' autoguardada."""
+    """Carga la 'última sesión' autoguardada del usuario actual."""
     if not META_PATH.exists():
         return
     try:
@@ -179,7 +305,7 @@ def cargar_sesion():
 
 
 def borrar_sesion_guardada():
-    """Borra únicamente el autoguardado de 'última sesión' (no toca el historial)."""
+    """Borra únicamente el autoguardado de 'última sesión' del usuario actual (no toca el historial)."""
     try:
         if META_PATH.exists():
             META_PATH.unlink()
@@ -190,14 +316,15 @@ def borrar_sesion_guardada():
         st.sidebar.warning(f"No fue posible borrar la sesión guardada: {e}")
 
 
-# ---- Historial de guardados manuales ----
+# ---- Historial de guardados manuales (por usuario) ----
 
 def guardar_historial() -> str | None:
     """
-    Crea una NUEVA entrada en el historial de guardados (nunca sobrescribe las
-    anteriores). Se usa exclusivamente cuando el usuario presiona "Guardar ahora".
-    El identificador de la entrada incluye fecha, hora, minuto, segundo y
-    microsegundos (para evitar colisiones si se guarda dos veces muy seguido).
+    Crea una NUEVA entrada en el historial de guardados del usuario actual (nunca
+    sobrescribe las anteriores, ni las de otros usuarios). Se usa exclusivamente
+    cuando el usuario presiona "Guardar ahora". El identificador de la entrada
+    incluye fecha, hora, minuto, segundo y microsegundos (para evitar colisiones
+    si se guarda dos veces muy seguido).
     """
     try:
         HISTORIAL_DIR.mkdir(parents=True, exist_ok=True)
@@ -228,7 +355,7 @@ def guardar_historial() -> str | None:
 
 
 def listar_historial() -> list:
-    """Devuelve la lista de guardados manuales, del más reciente al más antiguo."""
+    """Devuelve la lista de guardados manuales DEL USUARIO ACTUAL, del más reciente al más antiguo."""
     if not HISTORIAL_DIR.exists():
         return []
     entradas = []
@@ -244,7 +371,7 @@ def listar_historial() -> list:
 
 
 def cargar_desde_historial(id_guardado: str):
-    """Reemplaza el estado actual por el de una entrada específica del historial."""
+    """Reemplaza el estado actual por el de una entrada específica del historial del usuario actual."""
     carpeta = HISTORIAL_DIR / id_guardado
     meta_path = carpeta / "meta.json"
     if not meta_path.exists():
@@ -277,6 +404,7 @@ def borrar_entrada_historial(id_guardado: str):
 
 
 def borrar_historial_completo():
+    """Borra únicamente el historial del usuario actual, sin afectar el de otros usuarios."""
     try:
         if HISTORIAL_DIR.exists():
             shutil.rmtree(HISTORIAL_DIR)
@@ -298,7 +426,7 @@ if "datasets_seleccionados" not in st.session_state:
     st.session_state.datasets_seleccionados = []   # lista de nombres de dataset incluidos en el reporte
 
 
-# Ofrecer recuperar la sesión anterior si aún no hay archivos cargados en esta sesión
+# Ofrecer recuperar la sesión anterior del usuario actual si aún no hay archivos cargados en esta sesión
 if not st.session_state.archivos_originales and hay_sesion_guardada():
     with st.sidebar:
         st.markdown("### 🕒 Sesión anterior detectada")
@@ -315,12 +443,17 @@ if not st.session_state.archivos_originales and hay_sesion_guardada():
             st.rerun()
 
 with st.sidebar:
+    st.markdown(f"### 👤 {usuario_actual}")
+    if st.button("Cerrar sesión"):
+        st.session_state.usuario = None
+        st.rerun()
+
     st.markdown("###  Gestión de sesión")
     col_guardar, col_borrar = st.columns(2)
     with col_guardar:
         if st.button("Guardar ahora"):
-            guardar_sesion()          # actualiza la 'última sesión'
-            id_nuevo = guardar_historial()  # crea una entrada nueva en el historial
+            guardar_sesion()          # actualiza la 'última sesión' del usuario actual
+            id_nuevo = guardar_historial()  # crea una entrada nueva en el historial del usuario actual
             if id_nuevo:
                 st.success("Sesión guardada y agregada al historial.")
     with col_borrar:
@@ -1232,7 +1365,7 @@ total_filas = sum(len(c["df"]) for c in resultados_por_dataset.values())
 num_datasets = len(resultados_por_dataset)
 num_graficos = len(imagenes_graficos)
 
-st.success(f"📋 **Resumen de Exportación:** Vas a exportar **{num_datasets}** dataset(s), **{total_filas}** filas en total y **{num_graficos}** gráfico(s).")
+st.success(f" **Resumen de Exportación:** Vas a exportar **{num_datasets}** dataset(s), **{total_filas}** filas en total y **{num_graficos}** gráfico(s).")
 
 # 2. Agregar Notas y Comentarios
 notas_reporte = st.text_area("📝 Notas o comentarios adicionales (se incluirán en el PDF y en el Excel global)", placeholder="Escribe aquí observaciones generales para el reporte...")
