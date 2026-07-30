@@ -183,6 +183,10 @@ if "graficos" not in st.session_state:
     st.session_state.graficos = []                # lista de dicts {id, dataset, eje_x, eje_y, tipo}
 if "datasets_seleccionados" not in st.session_state:
     st.session_state.datasets_seleccionados = []   # lista de nombres de dataset incluidos en el reporte
+# ============ INICIO CAMBIOS Alanis (Editar gráfico) ============
+if "editando_grafico" not in st.session_state:
+    st.session_state.editando_grafico = None       # id del gráfico actualmente en edición, o None
+# ============ FIN CAMBIOS Alanis ============
 
 
 # Ofrecer recuperar la sesión anterior si aún no hay archivos cargados en esta sesión
@@ -1092,6 +1096,84 @@ else:
         paleta_grafico = PALETAS_DISPONIBLES.get(nombre_paleta, PALETA_COLORES)
         # ============ FIN CAMBIOS Alanis ============
 
+        # ============ INICIO CAMBIOS Alanis (Editar gráfico) ============
+        # Detecta si este gráfico está actualmente en modo edición
+        esta_editando = st.session_state.get("editando_grafico") == g["id"]
+
+        if esta_editando:
+            st.markdown(f"**✏️ Editando gráfico** _(dataset: {g['dataset']})_")
+            with st.form(f"form_editar_{g['id']}"):
+                col_ex, col_ey, col_t = st.columns(3)
+                columnas_disp = df_g.columns.tolist()
+                columnas_num_disp = df_g.select_dtypes(include="number").columns.tolist()
+
+                with col_ex:
+                    idx_x = columnas_disp.index(g["eje_x"]) if g["eje_x"] in columnas_disp else 0
+                    eje_x_edit = st.selectbox(
+                        "Eje X", columnas_disp, index=idx_x, key=f"editar_eje_x_{g['id']}"
+                    )
+                with col_ey:
+                    idx_y = columnas_num_disp.index(g["eje_y"]) if g["eje_y"] in columnas_num_disp else 0
+                    eje_y_edit = st.selectbox(
+                        "Eje Y (numérico)", columnas_num_disp, index=idx_y, key=f"editar_eje_y_{g['id']}"
+                    )
+                with col_t:
+                    tipos_disp = ["Barras", "Pastel", "Líneas", "Dispersión"]
+                    idx_tipo = tipos_disp.index(g["tipo"]) if g["tipo"] in tipos_disp else 0
+                    tipo_edit = st.selectbox(
+                        "Tipo de gráfico", tipos_disp, index=idx_tipo, key=f"editar_tipo_{g['id']}"
+                    )
+
+                titulo_edit = st.text_input(
+                    "Título del gráfico (opcional — si se deja vacío se genera uno automático)",
+                    value=g.get("titulo", ""), key=f"editar_titulo_{g['id']}"
+                )
+
+                col_o, col_p = st.columns(2)
+                with col_o:
+                    ordenes_disp = ["Sin ordenar", "Mayor a menor", "Menor a mayor"]
+                    idx_orden = ordenes_disp.index(g.get("orden", "Sin ordenar"))
+                    orden_edit = st.selectbox(
+                        "Orden de los datos", ordenes_disp, index=idx_orden, key=f"editar_orden_{g['id']}"
+                    )
+                with col_p:
+                    paletas_disp = list(PALETAS_DISPONIBLES.keys())
+                    nombre_paleta_actual = g.get("paleta", "Plotly (predeterminada)")
+                    idx_paleta = paletas_disp.index(nombre_paleta_actual) if nombre_paleta_actual in paletas_disp else 0
+                    paleta_edit = st.selectbox(
+                        "Paleta de colores", paletas_disp, index=idx_paleta, key=f"editar_paleta_{g['id']}"
+                    )
+
+                col_guardar_edit, col_cancelar_edit = st.columns(2)
+                with col_guardar_edit:
+                    guardar_edicion = st.form_submit_button("💾 Guardar cambios")
+                with col_cancelar_edit:
+                    cancelar_edicion = st.form_submit_button("✖️ Cancelar")
+
+            if guardar_edicion:
+                for idx, gr in enumerate(st.session_state.graficos):
+                    if gr["id"] == g["id"]:
+                        st.session_state.graficos[idx] = {
+                            **gr,
+                            "eje_x": eje_x_edit,
+                            "eje_y": eje_y_edit,
+                            "tipo": tipo_edit,
+                            "titulo": titulo_edit.strip(),
+                            "orden": orden_edit,
+                            "paleta": paleta_edit,
+                        }
+                        break
+                st.session_state.editando_grafico = None
+                guardar_sesion()
+                st.rerun()
+            if cancelar_edicion:
+                st.session_state.editando_grafico = None
+                st.rerun()
+
+            st.divider()
+            continue  # no dibujar el gráfico normal mientras está en edición
+        # ============ FIN CAMBIOS Alanis (Editar gráfico) ============
+
         st.markdown(f"**{g['tipo']}** — {g['eje_y']} por {g['eje_x']}  _(dataset: {g['dataset']}, datos filtrados)_")
 
         try:
@@ -1164,9 +1246,9 @@ else:
         except Exception as e:
             st.error(f"No fue posible generar este gráfico: {e}")
 
-        # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
-        # Antes solo existía el botón "Eliminar"; se agregó una columna con el botón "Duplicar"
-        col_dup, col_del = st.columns(2)
+        # ============ INICIO CAMBIOS Alanis (Personalizar gráficos + Editar) ============
+        # Antes solo existía el botón "Eliminar"; se agregaron "Duplicar" y "Editar"
+        col_dup, col_edit, col_del = st.columns(3)
         with col_dup:
             if st.button("📋 Duplicar este gráfico", key=f"dup_{g['id']}"):
                 nuevo_grafico = dict(g)
@@ -1176,10 +1258,16 @@ else:
                 st.session_state.graficos.append(nuevo_grafico)
                 guardar_sesion()
                 st.rerun()
+        with col_edit:
+            if st.button("✏️ Editar este gráfico", key=f"editar_btn_{g['id']}"):
+                st.session_state.editando_grafico = g["id"]
+                st.rerun()
         with col_del:
             # ---- Botón original de eliminar (solo se movió dentro de la columna col_del) ----
             if st.button("🗑️ Eliminar este gráfico", key=f"del_{g['id']}"):
                 st.session_state.graficos = [x for x in st.session_state.graficos if x["id"] != g["id"]]
+                if st.session_state.get("editando_grafico") == g["id"]:
+                    st.session_state.editando_grafico = None
                 guardar_sesion()
                 st.rerun()
         # ============ FIN CAMBIOS Alanis ============
