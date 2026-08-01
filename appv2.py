@@ -135,7 +135,7 @@ def hay_sesion_guardada() -> bool:
 
 
 def guardar_sesion():
-    """Autoguardado: sobrescribe la 'última sesión' con el estado actual."""
+    """Guarda en disco los archivos originales y la configuración actual (CP-persistencia)."""
     try:
         CACHE_ARCHIVOS_DIR.mkdir(parents=True, exist_ok=True)
         for nombre, info in st.session_state.archivos_originales.items():
@@ -158,7 +158,6 @@ def guardar_sesion():
 
 
 def cargar_sesion():
-    """Carga la 'última sesión' autoguardada."""
     if not META_PATH.exists():
         return
     try:
@@ -179,7 +178,6 @@ def cargar_sesion():
 
 
 def borrar_sesion_guardada():
-    """Borra únicamente el autoguardado de 'última sesión' (no toca el historial)."""
     try:
         if META_PATH.exists():
             META_PATH.unlink()
@@ -296,6 +294,10 @@ if "graficos" not in st.session_state:
     st.session_state.graficos = []                # lista de dicts {id, dataset, eje_x, eje_y, tipo}
 if "datasets_seleccionados" not in st.session_state:
     st.session_state.datasets_seleccionados = []   # lista de nombres de dataset incluidos en el reporte
+# ============ INICIO CAMBIOS Alanis (Editar gráfico) ============
+if "editando_grafico" not in st.session_state:
+    st.session_state.editando_grafico = None       # id del gráfico actualmente en edición, o None
+# ============ FIN CAMBIOS Alanis ============
 
 
 # Ofrecer recuperar la sesión anterior si aún no hay archivos cargados en esta sesión
@@ -310,16 +312,16 @@ if not st.session_state.archivos_originales and hay_sesion_guardada():
             )
         except Exception:
             pass
-        if st.button(" Cargar última sesión"):
+        if st.button("🔄 Cargar última sesión"):
             cargar_sesion()
             st.rerun()
 
 with st.sidebar:
-    st.markdown("###  Gestión de sesión")
+    st.markdown("### 💾 Gestión de sesión")
     col_guardar, col_borrar = st.columns(2)
     with col_guardar:
         if st.button("Guardar ahora"):
-            guardar_sesion()          # actualiza la 'última sesión'
+            guardar_sesion()               # actualiza la 'última sesión'
             id_nuevo = guardar_historial()  # crea una entrada nueva en el historial
             if id_nuevo:
                 st.success("Sesión guardada y agregada al historial.")
@@ -328,7 +330,7 @@ with st.sidebar:
             borrar_sesion_guardada()
             st.success("Sesión guardada eliminada.")
 
-    st.markdown("###  Historial de guardados")
+    st.markdown("### 🕒 Historial de guardados")
     historial = listar_historial()
     if not historial:
         st.caption("Todavía no hay guardados en el historial. Use 'Guardar ahora' para crear el primero.")
@@ -342,11 +344,11 @@ with st.sidebar:
                     st.caption(nombres_archivos)
                 col_cargar, col_eliminar = st.columns(2)
                 with col_cargar:
-                    if st.button(" Cargar", key=f"cargar_hist_{entrada['id']}"):
+                    if st.button("🔄 Cargar", key=f"cargar_hist_{entrada['id']}"):
                         cargar_desde_historial(entrada["id"])
                         st.rerun()
                 with col_eliminar:
-                    if st.button(" Eliminar", key=f"borrar_hist_{entrada['id']}"):
+                    if st.button("🗑️ Eliminar", key=f"borrar_hist_{entrada['id']}"):
                         borrar_entrada_historial(entrada["id"])
                         st.rerun()
         if st.button("Vaciar historial completo"):
@@ -453,6 +455,23 @@ def validar_calidad_datos(df: pd.DataFrame) -> list:
 
     return advertencias
 
+def limpiar_filtros_dataset(nombre_ds: str):
+    """
+    Borra del estado de sesión todos los widgets de filtro de este dataset
+    (categóricos, fecha, rango numérico, búsqueda de texto, columnas ocultas)
+    para que vuelvan a su valor por defecto.
+    """
+    prefijos = (
+        f"filtro_{nombre_ds}_",
+        f"fecha_{nombre_ds}_",
+        f"rango_num_{nombre_ds}_",
+        f"busqueda_col_{nombre_ds}",
+        f"busqueda_texto_{nombre_ds}",
+        f"ocultar_cols_{nombre_ds}",
+    )
+    claves_a_borrar = [k for k in st.session_state.keys() if k.startswith(prefijos)]
+    for k in claves_a_borrar:
+        del st.session_state[k]
 
 # ====================================
 # LECTORES MULTI-FORMATO (Excel, CSV, Word, PDF, SQLite)
@@ -571,7 +590,7 @@ def leer_sub_dataset(nombre: str, info: dict, etiqueta, fila_encabezado: int = 0
 
 PALETA_COLORES = px.colors.qualitative.Plotly  # paleta de colores explícita para forzar color en la exportación
 
-# ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+# ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
 # Paletas de colores seleccionables por el usuario para cada gráfico
 PALETAS_DISPONIBLES = {
     "Plotly (predeterminada)": px.colors.qualitative.Plotly,
@@ -581,7 +600,7 @@ PALETAS_DISPONIBLES = {
     "Bold": px.colors.qualitative.Bold,
     "Safe": px.colors.qualitative.Safe,
 }
-# ============ FIN CAMBIOS ALANIS ============
+# ============ FIN CAMBIOS Alanis ============
 
 # Tamaño de embebido de cada gráfico en la hoja "Graficos" del Excel (en píxeles).
 # Se fija explícitamente para que las imágenes no se dibujen "a tamaño completo" (lo que
@@ -662,8 +681,16 @@ def _dibujar_grafico_pdf(pdf: "FPDF", titulo: str, img_bytes: bytes):
 
 def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin_dataset: list | None = None, notas: str = "") -> bytes:
     """
-    Genera un PDF con los KPIs, TABLA COMPLETA de datos filtrados y gráficos.
-    También incorpora las notas al inicio si están disponibles.
+    Genera un PDF con, para CADA dataset incluido en el reporte:
+    sus KPIs, la TABLA COMPLETA de datos filtrados (paginada, sin límite de filas) y,
+    justo después de la tabla, el/los gráfico(s) que usan ese dataset (cada uno en su
+    propia página, para que se vea grande y legible). También incorpora las notas al
+    inicio si el usuario las agregó.
+
+    datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
+    imagenes_por_dataset: {nombre_dataset: [(titulo, bytes_png), ...]}
+    imagenes_sin_dataset: gráficos "huérfanos" (caso excepcional, por si su dataset ya no
+        está entre los seleccionados); se agregan al final para no perderlos.
     """
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
@@ -735,13 +762,18 @@ def _nombre_hoja_valido(nombre: str, usados: set) -> str:
 
 def generar_excel(datasets_reporte: dict, imagenes_graficos: list, notas: str = "") -> bytes:
     """
-    Genera un Excel con los datasets, hoja de Notas, y gráficos incrustados.
+    Genera un Excel con UNA HOJA POR CADA dataset incluido en el reporte (datos filtrados),
+    una hoja "Notas" (si el usuario escribió alguna), una hoja "Indicadores" combinada y una
+    hoja "Graficos" con los gráficos incrustados, cada uno con un tamaño fijo y suficiente
+    espacio vertical para que no se superpongan.
+
+    datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
+    imagenes_graficos: [(titulo, bytes_png, nombre_dataset), ...]
     """
     buffer = BytesIO()
     nombres_hoja_usados = set()
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-
         # Pestaña de Notas (se coloca al principio si existe)
         if notas:
             df_notas = pd.DataFrame({"Notas / Comentarios del Reporte": [notas]})
@@ -766,7 +798,8 @@ def generar_excel(datasets_reporte: dict, imagenes_graficos: list, notas: str = 
                 hoja_graficos.cell(row=fila_actual, column=1, value=titulo)
                 try:
                     img = OpenpyxlImage(BytesIO(img_bytes))
-                    # Tamaño fijo para que todos los gráficos se vean parejos y no se superpongan
+                    # Tamaño fijo para que todos los gráficos se vean parejos y no
+                    # se superpongan entre sí (antes se insertaban a tamaño original).
                     img.width = ANCHO_IMG_EXCEL
                     img.height = ALTO_IMG_EXCEL
                     hoja_graficos.add_image(img, f"A{fila_actual + 1}")
@@ -943,8 +976,56 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
         st.markdown("**Vista previa**")
         st.dataframe(datos, use_container_width=True)
 
+        def _resetear_filtros_callback(nombre_ds=nombre_ds, datos=datos):
+            columnas_categoricas_r = [
+                c for c in datos.columns
+                if (pd.api.types.is_object_dtype(datos[c]) or pd.api.types.is_string_dtype(datos[c]) or str(datos[c].dtype) == "category")
+                and datos[c].nunique(dropna=True) <= 50
+            ]
+            for col in columnas_categoricas_r:
+                valores = sorted(datos[col].dropna().unique().tolist())
+                st.session_state[f"filtro_{nombre_ds}_{col}"] = valores
+
+            columnas_fecha_r = [c for c in datos.columns if pd.api.types.is_datetime64_any_dtype(datos[c])]
+            for col in columnas_fecha_r:
+                col_valida = datos[col].dropna()
+                if col_valida.empty:
+                    continue
+                fmin, fmax = col_valida.min().date(), col_valida.max().date()
+                if fmin == fmax:
+                    continue
+                st.session_state[f"fecha_{nombre_ds}_{col}"] = (fmin, fmax)
+
+            columnas_numericas_r = datos.select_dtypes(include="number").columns.tolist()
+            for col in columnas_numericas_r:
+                col_valida = datos[col].dropna()
+                if col_valida.empty:
+                    continue
+                rmin, rmax = int(col_valida.min()), int(col_valida.max())
+                if rmin == rmax:
+                    continue
+                st.session_state[f"rango_num_{nombre_ds}_{col}"] = (rmin, rmax)
+
+            columnas_texto_r = [
+                c for c in datos.columns
+                if pd.api.types.is_object_dtype(datos[c]) or pd.api.types.is_string_dtype(datos[c]) or str(datos[c].dtype) == "category"
+            ]
+            if columnas_texto_r:
+                st.session_state[f"busqueda_col_{nombre_ds}"] = columnas_texto_r[0]
+            st.session_state[f"busqueda_texto_{nombre_ds}"] = ""
+            st.session_state[f"ocultar_cols_{nombre_ds}"] = []
+
         # --- Filtros propios de este dataset ---
-        st.markdown("**Filtros**")
+        col_titulo_filtros, col_boton_reset = st.columns([4, 1])
+        with col_titulo_filtros:
+            st.markdown("**Filtros**")
+        with col_boton_reset:
+            st.button(
+                "🧹 Quitar todos los filtros",
+                key=f"reset_{nombre_ds}",
+                on_click=_resetear_filtros_callback,
+            )
+
         datos_filtrados = datos.copy()
 
         columnas_categoricas = [
@@ -984,8 +1065,60 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
                     (datos_filtrados[col].dt.date >= rango[0]) & (datos_filtrados[col].dt.date <= rango[1])
                 ]
 
+        # Filtro por rango numérico
+        columnas_numericas_filtro = datos.select_dtypes(include="number").columns.tolist()
+        if columnas_numericas_filtro:
+            with st.expander("Filtrar por rango numérico"):
+                columnas_rango_ui = st.columns(min(3, len(columnas_numericas_filtro)))
+                for i, col in enumerate(columnas_numericas_filtro):
+                    col_valida = datos[col].dropna()
+                    if col_valida.empty:
+                        continue
+                    minimo, maximo = int(col_valida.min()), int(col_valida.max())
+                    if minimo == maximo:
+                        continue
+                    with columnas_rango_ui[i % len(columnas_rango_ui)]:
+                        rango_num = st.slider(
+                            f"{col}", min_value=minimo, max_value=maximo,
+                            value=(minimo, maximo), key=f"rango_num_{nombre_ds}_{col}"
+                        )
+                    datos_filtrados = datos_filtrados[
+                        (datos_filtrados[col] >= rango_num[0]) & (datos_filtrados[col] <= rango_num[1])
+                    ]
+
+        # Búsqueda de una palabra dentro de una columna
+        columnas_texto_busqueda = [
+            c for c in datos.columns
+            if datos[c].dtype == "object" or str(datos[c].dtype) == "category"
+        ]
+        if columnas_texto_busqueda:
+            with st.expander("Buscar palabra en una columna"):
+                col_busq_1, col_busq_2 = st.columns(2)
+                with col_busq_1:
+                    columna_busqueda = st.selectbox(
+                        "Columna", columnas_texto_busqueda, key=f"busqueda_col_{nombre_ds}"
+                    )
+                with col_busq_2:
+                    texto_busqueda = st.text_input(
+                        "Palabra o texto a buscar", key=f"busqueda_texto_{nombre_ds}"
+                    )
+                if texto_busqueda:
+                    datos_filtrados = datos_filtrados[
+                        datos_filtrados[columna_busqueda]
+                        .astype(str)
+                        .str.contains(texto_busqueda, case=False, na=False)
+                    ]
+
         if datos_filtrados.empty:
             st.warning("Los filtros seleccionados no arrojan ningún registro para este dataset.")
+
+        # Ocultar columnas
+        columnas_a_ocultar = st.multiselect(
+            "Ocultar columnas (no se muestran ni se incluyen en la tabla/reporte de este dataset)",
+            datos.columns.tolist(), default=[], key=f"ocultar_cols_{nombre_ds}"
+        )
+        if columnas_a_ocultar:
+            datos_filtrados = datos_filtrados.drop(columns=columnas_a_ocultar)
 
         # --- Indicadores propios de este dataset ---
         st.markdown("**Indicadores**")
@@ -1047,7 +1180,8 @@ else:
             eje_y_nuevo = st.selectbox("Eje Y (numérico)", columnas_num_grafico, key="nuevo_eje_y")
         with col_tipo:
             tipo_nuevo = st.selectbox("Tipo de gráfico", ["Barras", "Pastel", "Líneas", "Dispersión"], key="nuevo_tipo")
-        # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+
+        # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
         titulo_nuevo = st.text_input(
             "Título del gráfico (opcional — si se deja vacío se genera uno automático)",
             key="nuevo_titulo",
@@ -1066,7 +1200,7 @@ else:
                 list(PALETAS_DISPONIBLES.keys()),
                 key="nueva_paleta",
             )
-        # ============ FIN CAMBIOS ALANIS ============
+        # ============ FIN CAMBIOS Alanis ============
 
         agregar = st.form_submit_button("➕ Agregar gráfico")
         if agregar:
@@ -1106,14 +1240,92 @@ else:
             st.info(f"'{g['dataset']}' no tiene registros con los filtros actuales; este gráfico se omite.")
             continue
 
-        # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+        # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
         # Valores con .get() para no romper gráficos guardados de sesiones anteriores
         # a esta actualización (que no tenían título/orden/paleta propios).
         titulo_personalizado = (g.get("titulo") or "").strip()
         orden_grafico = g.get("orden", "Sin ordenar")
         nombre_paleta = g.get("paleta", "Plotly (predeterminada)")
         paleta_grafico = PALETAS_DISPONIBLES.get(nombre_paleta, PALETA_COLORES)
-        # ============ FIN CAMBIOS ALANIS ============
+        # ============ FIN CAMBIOS Alanis ============
+
+        # ============ INICIO CAMBIOS Alanis (Editar gráfico) ============
+        # Detecta si este gráfico está actualmente en modo edición
+        esta_editando = st.session_state.get("editando_grafico") == g["id"]
+
+        if esta_editando:
+            st.markdown(f"**✏️ Editando gráfico** _(dataset: {g['dataset']})_")
+            with st.form(f"form_editar_{g['id']}"):
+                col_ex, col_ey, col_t = st.columns(3)
+                columnas_disp = df_g.columns.tolist()
+                columnas_num_disp = df_g.select_dtypes(include="number").columns.tolist()
+
+                with col_ex:
+                    idx_x = columnas_disp.index(g["eje_x"]) if g["eje_x"] in columnas_disp else 0
+                    eje_x_edit = st.selectbox(
+                        "Eje X", columnas_disp, index=idx_x, key=f"editar_eje_x_{g['id']}"
+                    )
+                with col_ey:
+                    idx_y = columnas_num_disp.index(g["eje_y"]) if g["eje_y"] in columnas_num_disp else 0
+                    eje_y_edit = st.selectbox(
+                        "Eje Y (numérico)", columnas_num_disp, index=idx_y, key=f"editar_eje_y_{g['id']}"
+                    )
+                with col_t:
+                    tipos_disp = ["Barras", "Pastel", "Líneas", "Dispersión"]
+                    idx_tipo = tipos_disp.index(g["tipo"]) if g["tipo"] in tipos_disp else 0
+                    tipo_edit = st.selectbox(
+                        "Tipo de gráfico", tipos_disp, index=idx_tipo, key=f"editar_tipo_{g['id']}"
+                    )
+
+                titulo_edit = st.text_input(
+                    "Título del gráfico (opcional — si se deja vacío se genera uno automático)",
+                    value=g.get("titulo", ""), key=f"editar_titulo_{g['id']}"
+                )
+
+                col_o, col_p = st.columns(2)
+                with col_o:
+                    ordenes_disp = ["Sin ordenar", "Mayor a menor", "Menor a mayor"]
+                    idx_orden = ordenes_disp.index(g.get("orden", "Sin ordenar"))
+                    orden_edit = st.selectbox(
+                        "Orden de los datos", ordenes_disp, index=idx_orden, key=f"editar_orden_{g['id']}"
+                    )
+                with col_p:
+                    paletas_disp = list(PALETAS_DISPONIBLES.keys())
+                    nombre_paleta_actual = g.get("paleta", "Plotly (predeterminada)")
+                    idx_paleta = paletas_disp.index(nombre_paleta_actual) if nombre_paleta_actual in paletas_disp else 0
+                    paleta_edit = st.selectbox(
+                        "Paleta de colores", paletas_disp, index=idx_paleta, key=f"editar_paleta_{g['id']}"
+                    )
+
+                col_guardar_edit, col_cancelar_edit = st.columns(2)
+                with col_guardar_edit:
+                    guardar_edicion = st.form_submit_button("💾 Guardar cambios")
+                with col_cancelar_edit:
+                    cancelar_edicion = st.form_submit_button("✖️ Cancelar")
+
+            if guardar_edicion:
+                for idx, gr in enumerate(st.session_state.graficos):
+                    if gr["id"] == g["id"]:
+                        st.session_state.graficos[idx] = {
+                            **gr,
+                            "eje_x": eje_x_edit,
+                            "eje_y": eje_y_edit,
+                            "tipo": tipo_edit,
+                            "titulo": titulo_edit.strip(),
+                            "orden": orden_edit,
+                            "paleta": paleta_edit,
+                        }
+                        break
+                st.session_state.editando_grafico = None
+                guardar_sesion()
+                st.rerun()
+            if cancelar_edicion:
+                st.session_state.editando_grafico = None
+                st.rerun()
+
+            st.divider()
+            continue  # no dibujar el gráfico normal mientras está en edición
+        # ============ FIN CAMBIOS Alanis (Editar gráfico) ============
 
         st.markdown(f"**{g['tipo']}** — {g['eje_y']} por {g['eje_x']}  _(dataset: {g['dataset']}, datos filtrados)_")
 
@@ -1126,7 +1338,8 @@ else:
                 resumen = df_g.groupby(g["eje_x"])[g["eje_y"]].sum().reset_index()
                 col_valor = g["eje_y"]
 
-            # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+            # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
+            # Ordenar los datos según lo elegido
             if orden_grafico == "Mayor a menor":
                 resumen = resumen.sort_values(by=col_valor, ascending=False)
             elif orden_grafico == "Menor a mayor":
@@ -1135,41 +1348,43 @@ else:
             color_principal = paleta_grafico[indice_color % len(paleta_grafico)]  # antes: PALETA_COLORES fijo
             titulo_auto = f"{col_valor} por {g['eje_x']}"
             titulo_final = titulo_personalizado if titulo_personalizado else titulo_auto
-            # ============ FIN CAMBIOS ALANIS ============
+            # ============ FIN CAMBIOS Alanis ============
 
             if g["tipo"] == "Barras":
                 fig = px.bar(
                     resumen, x=g["eje_x"], y=col_valor,
-                    title=titulo_final,  # CAMBIO ALANIS: antes f"{col_valor} por {g['eje_x']}" fijo
+                    title=titulo_final,  # CAMBIO Alanis: antes f"{col_valor} por {g['eje_x']}" fijo
                     color=g["eje_x"],
-                    color_discrete_sequence=paleta_grafico,  # CAMBIO ALANIS: antes PALETA_COLORES fijo
+                    color_discrete_sequence=paleta_grafico,  # CAMBIO Alanis: antes PALETA_COLORES fijo
                 )
-                # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+                # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
+                # Con orden explícito, se fija el orden de categorías del eje X para
+                # que el sort no lo pierda Plotly al colorear por categoría.
                 if orden_grafico != "Sin ordenar":
                     fig.update_xaxes(categoryorder="array", categoryarray=resumen[g["eje_x"]].tolist())
-                # ============ FIN CAMBIOS ALANIS ============
+                # ============ FIN CAMBIOS Alanis ============
             elif g["tipo"] == "Pastel":
-                titulo_pastel = titulo_personalizado if titulo_personalizado else f"Distribución de {col_valor}"  # CAMBIO ALANIS
+                titulo_pastel = titulo_personalizado if titulo_personalizado else f"Distribución de {col_valor}"  # CAMBIO Alanis
                 fig = px.pie(
                     resumen, names=g["eje_x"], values=col_valor,
-                    title=titulo_pastel,  # CAMBIO ALANIS: antes f"Distribución de {col_valor}" fijo
-                    color_discrete_sequence=paleta_grafico,  # CAMBIO ALANIS: antes PALETA_COLORES fijo
+                    title=titulo_pastel,  # CAMBIO Alanis: antes f"Distribución de {col_valor}" fijo
+                    color_discrete_sequence=paleta_grafico,  # CAMBIO Alanis: antes PALETA_COLORES fijo
                 )
             elif g["tipo"] == "Líneas":
                 fig = px.line(
                     resumen, x=g["eje_x"], y=col_valor,
-                    title=titulo_final,  # CAMBIO ALANIS: antes f"{col_valor} por {g['eje_x']}" fijo
+                    title=titulo_final,  # CAMBIO Alanis: antes f"{col_valor} por {g['eje_x']}" fijo
                     markers=True, color_discrete_sequence=[color_principal],
                 )
-                # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
+                # ============ INICIO CAMBIOS Alanis (Personalizar gráficos) ============
                 if orden_grafico != "Sin ordenar":
                     fig.update_xaxes(categoryorder="array", categoryarray=resumen[g["eje_x"]].tolist())
-                # ============ FIN CAMBIOS ALANIS ============
+                # ============ FIN CAMBIOS Alanis ============
             else:
-                titulo_dispersion = titulo_personalizado if titulo_personalizado else f"{g['eje_y']} vs {g['eje_x']}"  # CAMBIO ALANIS
+                titulo_dispersion = titulo_personalizado if titulo_personalizado else f"{g['eje_y']} vs {g['eje_x']}"  # CAMBIO Alanis
                 fig = px.scatter(
                     df_g, x=g["eje_x"], y=g["eje_y"],
-                    title=titulo_dispersion,  # CAMBIO ALANIS: antes f"{g['eje_y']} vs {g['eje_x']}" fijo
+                    title=titulo_dispersion,  # CAMBIO Alanis: antes f"{g['eje_y']} vs {g['eje_x']}" fijo
                     color_discrete_sequence=[color_principal],
                 )
 
@@ -1177,16 +1392,16 @@ else:
 
             imagen_png = fig_a_imagen_png(fig)
             if imagen_png:
-                # CAMBIO ALANIS: se usa el título personalizado si existe, si no el formato original
+                # CAMBIO Alanis: se usa el título personalizado si existe, si no el formato original
                 titulo_grafico = f"{titulo_final} ({g['dataset']})" if titulo_personalizado else f"{g['tipo']} - {col_valor} por {g['eje_x']} ({g['dataset']})"
                 imagenes_graficos.append((titulo_grafico, imagen_png, g["dataset"]))
 
         except Exception as e:
             st.error(f"No fue posible generar este gráfico: {e}")
 
-        # ============ INICIO CAMBIOS ALANIS (Personalizar gráficos) ============
-        # Antes solo existía el botón "Eliminar"; se agregó una columna con el botón "Duplicar"
-        col_dup, col_del = st.columns(2)
+        # ============ INICIO CAMBIOS Alanis (Personalizar gráficos + Editar) ============
+        # Antes solo existía el botón "Eliminar"; se agregaron "Duplicar" y "Editar"
+        col_dup, col_edit, col_del = st.columns(3)
         with col_dup:
             if st.button("📋 Duplicar este gráfico", key=f"dup_{g['id']}"):
                 nuevo_grafico = dict(g)
@@ -1196,13 +1411,19 @@ else:
                 st.session_state.graficos.append(nuevo_grafico)
                 guardar_sesion()
                 st.rerun()
+        with col_edit:
+            if st.button("✏️ Editar este gráfico", key=f"editar_btn_{g['id']}"):
+                st.session_state.editando_grafico = g["id"]
+                st.rerun()
         with col_del:
             # ---- Botón original de eliminar (solo se movió dentro de la columna col_del) ----
             if st.button("🗑️ Eliminar este gráfico", key=f"del_{g['id']}"):
                 st.session_state.graficos = [x for x in st.session_state.graficos if x["id"] != g["id"]]
+                if st.session_state.get("editando_grafico") == g["id"]:
+                    st.session_state.editando_grafico = None
                 guardar_sesion()
                 st.rerun()
-        # ============ FIN CAMBIOS ALANIS ============
+        # ============ FIN CAMBIOS Alanis ============
 
         st.divider()
 
@@ -1243,7 +1464,6 @@ col_excel, col_pdf = st.columns(2)
 
 with col_excel:
     try:
-        # Se le pasa 'notas_reporte' a generar_excel
         buffer_excel = generar_excel(resultados_por_dataset, imagenes_graficos, notas=notas_reporte)
         st.download_button(
             label="📥 Descargar Reporte Global en Excel",
@@ -1263,7 +1483,6 @@ with col_pdf:
         st.caption("Para exportar a PDF instale la librería: pip install fpdf2")
     else:
         try:
-            # Se le pasa 'notas_reporte' a generar_pdf
             pdf_bytes = generar_pdf(resultados_por_dataset, imagenes_por_dataset, imagenes_sin_dataset, notas=notas_reporte)
             st.download_button(
                 label="📥 Descargar Reporte Global en PDF",

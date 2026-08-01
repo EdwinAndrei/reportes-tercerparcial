@@ -1,34 +1,13 @@
 {
   "archivos": [
     {
-      "nombre": "Reporte_Global.xlsx",
+      "nombre": "muchosRegistros.xlsx",
       "tipo": "xlsx"
     }
   ],
-  "graficos": [
-    {
-      "id": "g0_1785370144.186864",
-      "dataset": "Reporte_Global.xlsx [muchosRegistros.xlsx Pagina1]",
-      "eje_x": "Cliente",
-      "eje_y": "Cantidad",
-      "tipo": "Líneas",
-      "titulo": "",
-      "orden": "Sin ordenar",
-      "paleta": "Plotly (predeterminada)"
-    },
-    {
-      "id": "g1_1785370168.370785",
-      "dataset": "Reporte_Global.xlsx [muchosRegistros.xlsx Pagina1]",
-      "eje_x": "Cliente",
-      "eje_y": "Cantidad",
-      "tipo": "Dispersión",
-      "titulo": "",
-      "orden": "Sin ordenar",
-      "paleta": "Plotly (predeterminada)"
-    }
-  ],
+  "graficos": [],
   "datasets_seleccionados": [
-    "Reporte_Global.xlsx [muchosRegistros.xlsx Pagina1]"
+    "muchosRegistros.xlsx [Pagina1]"
   ],
-  "fecha": "2026-07-29 18:09:32"
+  "fecha": "2026-08-01 09:45:48"
 }
