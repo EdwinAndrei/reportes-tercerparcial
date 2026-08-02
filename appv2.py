@@ -198,9 +198,10 @@ with st.expander("GUIA RAPIDA DE USO"):
     4. Revise las advertencias de calidad de datos antes de interpretar los indicadores.
     5. Use los filtros de cada dataset (categorías, fechas, rango numérico, búsqueda de texto u
        ocultar columnas). Si quiere empezar de nuevo, use el botón **"Quitar todos los filtros"**.
-    6. Agregue uno o **varios gráficos**, cada uno puede usar un dataset distinto (se grafican los datos
-       ya filtrados). Cada gráfico se puede **duplicar**, **editar** (cambiar ejes, tipo, título, orden
-       o paleta de colores) o **eliminar** en cualquier momento.
+    6. Agregue uno o **varios gráficos** (Barras, Pastel, Líneas, Dispersión, Histograma o Boxplot),
+       cada uno puede usar un dataset distinto (se grafican los datos ya filtrados). Cada gráfico se
+       puede **duplicar**, **editar** (cambiar ejes, tipo, título, orden o paleta de colores) o
+       **eliminar** en cualquier momento.
     7. Descargue el reporte en Excel, CSV o PDF. El reporte **combina los datos filtrados de todos los
        datasets elegidos en el paso 3** (una hoja por dataset en Excel, una sección por dataset en PDF),
        y los archivos Excel y PDF **incluyen los gráficos** generados, con **todas las filas** (no solo una muestra).
@@ -1405,7 +1406,11 @@ else:
         with col_y:
             eje_y_nuevo = st.selectbox("Eje Y (numérico)", columnas_num_grafico, key="nuevo_eje_y")
         with col_tipo:
-            tipo_nuevo = st.selectbox("Tipo de gráfico", ["Barras", "Pastel", "Líneas", "Dispersión"], key="nuevo_tipo")
+            tipo_nuevo = st.selectbox(
+                "Tipo de gráfico",
+                ["Barras", "Pastel", "Líneas", "Dispersión", "Histograma", "Boxplot"],
+                key="nuevo_tipo"
+            )
 
         titulo_nuevo = st.text_input(
             "Título del gráfico (opcional — si se deja vacío se genera uno automático)",
@@ -1462,6 +1467,11 @@ else:
             st.info(f"'{g['dataset']}' no tiene registros con los filtros actuales; este gráfico se omite.")
             continue
 
+        if len(df_g) > 50000:
+            st.warning(
+                f"⚠️ El dataset tiene {len(df_g):,} registros. Es muy grande y el gráfico puede tardar en cargar."
+            )
+
         # Valores con .get() para no romper gráficos guardados de sesiones anteriores
         # a esta actualización (que no tenían título/orden/paleta propios).
         titulo_personalizado = (g.get("titulo") or "").strip()
@@ -1490,7 +1500,7 @@ else:
                         "Eje Y (numérico)", columnas_num_disp, index=idx_y, key=f"editar_eje_y_{g['id']}"
                     )
                 with col_t:
-                    tipos_disp = ["Barras", "Pastel", "Líneas", "Dispersión"]
+                    tipos_disp = ["Barras", "Pastel", "Líneas", "Dispersión", "Histograma", "Boxplot"]
                     idx_tipo = tipos_disp.index(g["tipo"]) if g["tipo"] in tipos_disp else 0
                     tipo_edit = st.selectbox(
                         "Tipo de gráfico", tipos_disp, index=idx_tipo, key=f"editar_tipo_{g['id']}"
@@ -1592,6 +1602,20 @@ else:
                 )
                 if orden_grafico != "Sin ordenar":
                     fig.update_xaxes(categoryorder="array", categoryarray=resumen[g["eje_x"]].tolist())
+            elif g["tipo"] == "Histograma":
+                titulo_histograma = titulo_personalizado if titulo_personalizado else f"Histograma de {g['eje_y']}"
+                fig = px.histogram(
+                    df_g, x=g["eje_y"],
+                    title=titulo_histograma,
+                    color_discrete_sequence=[color_principal],
+                )
+            elif g["tipo"] == "Boxplot":
+                titulo_boxplot = titulo_personalizado if titulo_personalizado else f"Boxplot de {g['eje_y']} por {g['eje_x']}"
+                fig = px.box(
+                    df_g, x=g["eje_x"], y=g["eje_y"],
+                    title=titulo_boxplot,
+                    color_discrete_sequence=[color_principal],
+                )
             else:
                 titulo_dispersion = titulo_personalizado if titulo_personalizado else f"{g['eje_y']} vs {g['eje_x']}"
                 fig = px.scatter(
