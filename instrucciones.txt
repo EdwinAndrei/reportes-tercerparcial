@@ -45,7 +45,7 @@ EJECUTAR LA APLICACIÓN
 
 Desde la carpeta del proyecto ejecutar:
 
-   python -m streamlit run app.py                           
+   python -m streamlit run appv2.py                           
 
 Si todo funciona correctamente aparecerá un mensaje similar a:
 
