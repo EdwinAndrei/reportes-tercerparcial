@@ -10,7 +10,6 @@ from datetime import datetime
 from collections import defaultdict
 import json
 import sqlite3
-import shutil
 
 # ====================================
 # DEPENDENCIAS OPCIONALES
@@ -82,9 +81,6 @@ with st.expander("GUIA RAPIDA DE USO"):
        En el PDF, el o los gráficos de cada dataset aparecen justo después de su tabla de datos filtrados.
     7. Su sesión se guarda automáticamente. Si cierra la app, al volver a abrirla puede pulsar
        **"Cargar última sesión"** para recuperar los archivos y gráficos en los que estaba trabajando.
-    8. Además, cada vez que presiona **"Guardar ahora"** se crea una **nueva entrada en el historial**
-       (con fecha, hora, minuto y segundo). Puede volver a cargar cualquiera de esos momentos guardados
-       desde la barra lateral, en **"Historial de guardados"**.
 
     **Columnas admitidas:** cualquier nombre de columna funciona; no es necesario que se llame
     exactamente "Categoria" o "Total". El sistema detecta automáticamente columnas categóricas,
@@ -111,23 +107,10 @@ if not FPDF_DISPONIBLE or not DOCX_DISPONIBLE or not PDFPLUMBER_DISPONIBLE or no
 # ====================================
 # PERSISTENCIA DE SESIÓN
 # ====================================
-#
-# Hay dos mecanismos independientes:
-#
-# 1) AUTOGUARDADO ("última sesión"): se sobrescribe automáticamente en varios
-#    puntos del flujo (al subir archivos, al agregar/quitar gráficos, al final
-#    de cada ejecución) para poder recuperar el trabajo si se cierra la app.
-#
-# 2) HISTORIAL DE GUARDADOS MANUALES: se crea una entrada NUEVA (no se
-#    sobrescribe ninguna anterior) cada vez que el usuario presiona el botón
-#    "Guardar ahora". Cada entrada queda con su fecha y hora exacta
-#    (día/mes/año hora:minuto:segundo) y puede cargarse de forma independiente.
 
 CACHE_DIR = Path(".cache_reportes")
 CACHE_ARCHIVOS_DIR = CACHE_DIR / "archivos"
 META_PATH = CACHE_DIR / "sesion.json"
-
-HISTORIAL_DIR = CACHE_DIR / "historial"
 
 
 def hay_sesion_guardada() -> bool:
@@ -135,7 +118,7 @@ def hay_sesion_guardada() -> bool:
 
 
 def guardar_sesion():
-    """Autoguardado: sobrescribe la 'última sesión' con el estado actual."""
+    """Guarda en disco los archivos originales y la configuración actual (CP-persistencia)."""
     try:
         CACHE_ARCHIVOS_DIR.mkdir(parents=True, exist_ok=True)
         for nombre, info in st.session_state.archivos_originales.items():
@@ -158,7 +141,6 @@ def guardar_sesion():
 
 
 def cargar_sesion():
-    """Carga la 'última sesión' autoguardada."""
     if not META_PATH.exists():
         return
     try:
@@ -179,7 +161,6 @@ def cargar_sesion():
 
 
 def borrar_sesion_guardada():
-    """Borra únicamente el autoguardado de 'última sesión' (no toca el historial)."""
     try:
         if META_PATH.exists():
             META_PATH.unlink()
@@ -190,120 +171,22 @@ def borrar_sesion_guardada():
         st.sidebar.warning(f"No fue posible borrar la sesión guardada: {e}")
 
 
-# ---- Historial de guardados manuales ----
-
-def guardar_historial() -> str | None:
-    """
-    Crea una NUEVA entrada en el historial de guardados (nunca sobrescribe las
-    anteriores). Se usa exclusivamente cuando el usuario presiona "Guardar ahora".
-    El identificador de la entrada incluye fecha, hora, minuto, segundo y
-    microsegundos (para evitar colisiones si se guarda dos veces muy seguido).
-    """
-    try:
-        HISTORIAL_DIR.mkdir(parents=True, exist_ok=True)
-        ahora = datetime.now()
-        id_guardado = ahora.strftime("%Y%m%d_%H%M%S_%f")
-        carpeta = HISTORIAL_DIR / id_guardado
-        carpeta_archivos = carpeta / "archivos"
-        carpeta_archivos.mkdir(parents=True, exist_ok=True)
-
-        for nombre, info in st.session_state.archivos_originales.items():
-            (carpeta_archivos / nombre).write_bytes(info["bytes"])
-
-        meta = {
-            "id": id_guardado,
-            "fecha": ahora.strftime("%d/%m/%Y %H:%M:%S"),
-            "archivos": [
-                {"nombre": nombre, "tipo": info["tipo"]}
-                for nombre, info in st.session_state.archivos_originales.items()
-            ],
-            "graficos": st.session_state.graficos,
-            "datasets_seleccionados": st.session_state.get("datasets_seleccionados", []),
-        }
-        (carpeta / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-        return id_guardado
-    except Exception as e:
-        st.sidebar.warning(f"No fue posible guardar en el historial: {e}")
-        return None
-
-
-def listar_historial() -> list:
-    """Devuelve la lista de guardados manuales, del más reciente al más antiguo."""
-    if not HISTORIAL_DIR.exists():
-        return []
-    entradas = []
-    for carpeta in HISTORIAL_DIR.iterdir():
-        meta_path = carpeta / "meta.json"
-        if meta_path.exists():
-            try:
-                entradas.append(json.loads(meta_path.read_text()))
-            except Exception:
-                continue
-    entradas.sort(key=lambda m: m.get("id", ""), reverse=True)
-    return entradas
-
-
-def cargar_desde_historial(id_guardado: str):
-    """Reemplaza el estado actual por el de una entrada específica del historial."""
-    carpeta = HISTORIAL_DIR / id_guardado
-    meta_path = carpeta / "meta.json"
-    if not meta_path.exists():
-        return
-    try:
-        meta = json.loads(meta_path.read_text())
-    except Exception:
-        return
-
-    st.session_state.archivos_originales = {}
-    for archivo_meta in meta.get("archivos", []):
-        nombre = archivo_meta["nombre"]
-        ruta = carpeta / "archivos" / nombre
-        if ruta.exists():
-            st.session_state.archivos_originales[nombre] = {
-                "bytes": ruta.read_bytes(),
-                "tipo": archivo_meta["tipo"],
-            }
-    st.session_state.graficos = meta.get("graficos", [])
-    st.session_state.datasets_seleccionados = meta.get("datasets_seleccionados", [])
-
-
-def borrar_entrada_historial(id_guardado: str):
-    try:
-        carpeta = HISTORIAL_DIR / id_guardado
-        if carpeta.exists():
-            shutil.rmtree(carpeta)
-    except Exception as e:
-        st.sidebar.warning(f"No fue posible borrar ese guardado: {e}")
-
-
-def borrar_historial_completo():
-    try:
-        if HISTORIAL_DIR.exists():
-            shutil.rmtree(HISTORIAL_DIR)
-    except Exception as e:
-        st.sidebar.warning(f"No fue posible borrar el historial: {e}")
-
 # ====================================
 # REINICIAR APLICACIÓN
 # ====================================
 
-# Borra los datos cargados para
-# empezar desde cero.
-
 def empezar_de_cero():
-
     st.session_state.archivos_originales = {}
     st.session_state.datasets = {}
     st.session_state.graficos = []
     st.session_state.datasets_seleccionados = []
 
-    # Reinicia el cargador de archivos.
     st.session_state.uploader_key += 1
-
-    # Borra la última sesión guardada.
     borrar_sesion_guardada()
-
     st.session_state.confirmar_reinicio = False
+
+
+
 
 # ====================================
 # ESTADO DE SESIÓN (multi-archivo, multi-dataset, multi-gráfico)
@@ -318,23 +201,21 @@ if "graficos" not in st.session_state:
 if "datasets_seleccionados" not in st.session_state:
     st.session_state.datasets_seleccionados = []   # lista de nombres de dataset incluidos en el reporte
 
-# -----------------------------
-# Reiniciar aplicación
-# -----------------------------
-# Variables para reiniciar
-# la aplicación.
-
-if "confirmar_reinicio" not in st.session_state:
+if "confirmar_reinicio" not in st.session_state:   # Variables para reiniciar la aplicación
     st.session_state.confirmar_reinicio = False
 
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
 if "archivo_a_quitar" not in st.session_state:
-    st.session_state.archivo_a_quitar = None    
+    st.session_state.archivo_a_quitar = None
+
+
+
+
 
 # Ofrecer recuperar la sesión anterior si aún no hay archivos cargados en esta sesión
-if not st.session_state.archivos_originales and hay_sesion_guardada():
+if hay_sesion_guardada():
     with st.sidebar:
         st.markdown("### 🕒 Sesión anterior detectada")
         try:
@@ -345,56 +226,26 @@ if not st.session_state.archivos_originales and hay_sesion_guardada():
             )
         except Exception:
             pass
-        if st.button(" Cargar última sesión"):
+        if st.button("🔄 Cargar última sesión"):
             cargar_sesion()
             st.rerun()
 
 with st.sidebar:
-    st.markdown("###  Gestión de sesión")
+    st.markdown("### 💾 Gestión de sesión")
     col_guardar, col_borrar = st.columns(2)
     with col_guardar:
         if st.button("Guardar ahora"):
-            guardar_sesion()          # actualiza la 'última sesión'
-            id_nuevo = guardar_historial()  # crea una entrada nueva en el historial
-            if id_nuevo:
-                st.success("Sesión guardada y agregada al historial.")
+            guardar_sesion()
+            st.success("Sesión guardada.")
     with col_borrar:
         if st.button("Borrar guardada"):
             borrar_sesion_guardada()
             st.success("Sesión guardada eliminada.")
 
 
-
-    st.markdown("###  Historial de guardados")
-    historial = listar_historial()
-    if not historial:
-        st.caption("Todavía no hay guardados en el historial. Use 'Guardar ahora' para crear el primero.")
-    else:
-        st.caption(f"{len(historial)} guardado(s) disponible(s).")
-        for entrada in historial:
-            n_archivos = len(entrada.get("archivos", []))
-            with st.expander(f"🕓 {entrada.get('fecha', '?')}  ({n_archivos} archivo(s))"):
-                nombres_archivos = ", ".join(a["nombre"] for a in entrada.get("archivos", []))
-                if nombres_archivos:
-                    st.caption(nombres_archivos)
-                col_cargar, col_eliminar = st.columns(2)
-                with col_cargar:
-                    if st.button(" Cargar", key=f"cargar_hist_{entrada['id']}"):
-                        cargar_desde_historial(entrada["id"])
-                        st.rerun()
-                with col_eliminar:
-                    if st.button(" Eliminar", key=f"borrar_hist_{entrada['id']}"):
-                        borrar_entrada_historial(entrada["id"])
-                        st.rerun()
-        if st.button("Vaciar historial completo"):
-            borrar_historial_completo()
-            st.rerun()
-
-
 # ====================================
 # FUNCIONES AUXILIARES DE LECTURA / CALIDAD DE DATOS
 # ====================================
-
 
 # Muestra el tamaño del archivo
 def obtener_tamano_archivo(cantidad_bytes: int) -> str:
@@ -403,10 +254,10 @@ def obtener_tamano_archivo(cantidad_bytes: int) -> str:
         return f"{tamano:.2f} KB - Archivo pequeño"
 
     tamano = cantidad_bytes / (1024 * 1024)
-    return f"{tamano:.2f} MB - Archivo grande" 
+    return f"{tamano:.2f} MB - Archivo grande"
 
-# Normaliza el nombre de las columnas
 def normalizar_nombre(col: str) -> str:
+    """Normaliza un nombre de columna para comparaciones flexibles."""
     return str(col).strip().lower().replace("_", " ")
 
 
@@ -474,20 +325,16 @@ def validar_calidad_datos(df: pd.DataFrame) -> list:
     """Revisa el dataframe y devuelve una lista de advertencias descriptivas."""
     advertencias = []
 
-    
-
     if df.empty:
         advertencias.append("El archivo no contiene registros (está vacío).")
         return advertencias
 
-
     filas_duplicadas = df.duplicated().sum()
+
     if filas_duplicadas > 0:
         advertencias.append(
-            f"Se encontraron {filas_duplicadas} fila(s) duplicada(s)."
-        )
-    
-
+        f"Se encontraron {filas_duplicadas} fila(s) duplicada(s)."
+    )
 
     filas_totalmente_vacias = df.isna().all(axis=1).sum()
     if filas_totalmente_vacias > 0:
@@ -835,24 +682,21 @@ archivos_subidos = st.file_uploader(
     key=f"cargador_{st.session_state.uploader_key}",
 )
 
-
-# Confirmar antes de borrar todo
 if not st.session_state.confirmar_reinicio:
     if st.button("Empezar de cero"):
         st.session_state.confirmar_reinicio = True
         st.rerun()
-
 else:
     st.warning("¿Está seguro de que desea borrar todos los datos cargados?")
 
-    col_confirmar, col_cancelar = st.columns(2)
+    col1, col2 = st.columns(2)
 
-    with col_confirmar:
+    with col1:
         if st.button("Sí, borrar todo"):
             empezar_de_cero()
             st.rerun()
 
-    with col_cancelar:
+    with col2:
         if st.button("Cancelar"):
             st.session_state.confirmar_reinicio = False
             st.rerun()
@@ -888,27 +732,34 @@ for nombre, info in list(st.session_state.archivos_originales.items()):
     tamano_archivo = obtener_tamano_archivo(len(info["bytes"]))
 
     with st.expander(
-        f"📄 {nombre}  ({info['tipo'].upper()}) - {tamano_archivo}",
+        f"📄 {nombre} ({info['tipo'].upper()}) - {tamano_archivo}",
         expanded=True
     ):
 
         col_info, col_quitar = st.columns([5, 1])
 
         with col_quitar:
-            if st.session_state.get("archivo_a_quitar") == nombre:
+            if st.session_state.archivo_a_quitar == nombre:
                 st.warning("¿Está seguro?")
 
                 if st.button("Sí, quitar", key=f"confirmar_quitar_{nombre}"):
-                    del st.session_state.archivos_originales[nombre]
+                     del st.session_state.archivos_originales[nombre]
 
-                    st.session_state.datasets_seleccionados = [
-                        d for d in st.session_state.datasets_seleccionados
+                     st.session_state.datasets_seleccionados = [
+                        d
+                        for d in st.session_state.datasets_seleccionados
                         if not d.startswith(nombre)
                     ]
 
-                    st.session_state.archivo_a_quitar = None
-                    guardar_sesion()
-                    st.rerun()
+                     st.session_state.archivo_a_quitar = None
+
+                    # Limpia el cargador para que el archivo no se vuelva a agregar
+                     st.session_state.uploader_key += 1
+
+                     guardar_sesion()
+                     st.rerun()
+
+                     st.session_state.uploader_key += 1
 
                 if st.button("Cancelar", key=f"cancelar_quitar_{nombre}"):
                     st.session_state.archivo_a_quitar = None
@@ -921,24 +772,22 @@ for nombre, info in list(st.session_state.archivos_originales.items()):
 
         tipo = info["tipo"]
 
+        if tipo == "csv":
+            fila_sugerida = detectar_fila_encabezado(info["bytes"], True)
+            fila = st.number_input(
+                "Fila donde comienza el encabezado real (0 = primera fila)",
+                min_value=0, max_value=50, value=int(fila_sugerida), key=f"fila_{nombre}"
+            )
+            try:
+                df = leer_sub_dataset(nombre, info, None, fila)
+                df = limpiar_encabezados(df)
+                df = df.loc[:, ~df.columns.astype(str).str.match(r"^Unnamed")]
+                nuevos_datasets[nombre] = df
+                st.caption(f"✅ {df.shape[0]} filas, {df.shape[1]} columnas")
+            except Exception as e:
+                st.error(f"No se pudo leer '{nombre}': {e}")
 
-
-
-    if tipo == "csv":
-        fila_sugerida = detectar_fila_encabezado(info["bytes"], True)
-        fila = st.number_input(
-            "Fila donde comienza el encabezado real (0 = primera fila)",
-            min_value=0, max_value=50, value=int(fila_sugerida), key=f"fila_{nombre}"
-        )
-        try:
-            df = leer_sub_dataset(nombre, info, None, fila)
-            df = limpiar_encabezados(df)
-            df = df.loc[:, ~df.columns.astype(str).str.match(r"^Unnamed")]
-            nuevos_datasets[nombre] = df
-            st.caption(f"✅ {df.shape[0]} filas, {df.shape[1]} columnas")
-        except Exception as e:
-            st.error(f"No se pudo leer '{nombre}': {e}")
-    else:
+        else:
             sub_opciones = obtener_sub_opciones(nombre, info)
 
             if not sub_opciones:
@@ -1091,10 +940,11 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
             )
             total = datos_filtrados[columna_indicador].sum()
             promedio = datos_filtrados[columna_indicador].mean()
+            registros = len(datos_filtrados)
+
             minimo = datos_filtrados[columna_indicador].min()
             maximo = datos_filtrados[columna_indicador].max()
             mediana = datos_filtrados[columna_indicador].median()
-            registros = len(datos_filtrados)
 
             c1, c2, c3 = st.columns(3)
             c1.metric("Total", f"{total:,.2f}")
@@ -1106,9 +956,6 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
             c5.metric("Máximo", f"{maximo:,.2f}")
             c6.metric("Mediana", f"{mediana:,.2f}")
 
-
-
-
             kpis_dataset = {
                 "Columna analizada": columna_indicador,
                 "Total": f"{total:,.2f}",
@@ -1117,6 +964,8 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
                 "Máximo": f"{maximo:,.2f}",
                 "Mediana": f"{mediana:,.2f}",
                 "Registros": registros,
+
+
             }
         else:
             st.caption("No hay columnas numéricas disponibles, o los filtros actuales no dejan registros.")
