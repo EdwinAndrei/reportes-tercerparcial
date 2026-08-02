@@ -25,7 +25,7 @@ Cómo Iniciar la Aplicación
 
 A diferencia de una aplicación de escritorio tradicional, este sistema no requiere un inicio de sesión con usuario y contraseña; el acceso se realiza ejecutando el servidor local de Streamlit. Los pasos son los siguientes:
 1.	Abrir una terminal en la carpeta del proyecto.
-2.	Ejecutar el comando: py -3.12 -m streamlit run appv3_penultima.py
+2.	Ejecutar el comando: py -3.12 -m streamlit run appv2.py
 3.	Esperar a que la terminal muestre la dirección local (por ejemplo, http://localhost:8501).
 4.	La aplicación se abrirá automáticamente en el navegador; si no ocurre, copiar y pegar la dirección manualmente.
 
