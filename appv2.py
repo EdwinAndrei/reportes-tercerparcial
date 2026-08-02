@@ -10,9 +10,6 @@ from datetime import datetime
 from collections import defaultdict
 import json
 import sqlite3
-import shutil
-import hashlib
-import secrets
 
 # ====================================
 # DEPENDENCIAS OPCIONALES
@@ -59,126 +56,6 @@ st.set_page_config(
     layout="wide"
 )
 
-
-# ====================================
-# LOGIN (separa los datos guardados por usuario)
-# ====================================
-#
-# Este login NO maneja roles ni permisos: su único propósito es identificar
-# quién está usando la aplicación para que el autoguardado y el historial de
-# cada usuario queden completamente separados de los demás. Como la app corre
-# en línea y todos comparten el mismo servidor, sin esto el historial de un
-# usuario se mezclaría con el de otro.
-
-BASE_CACHE_DIR = Path(".cache_reportes")
-USUARIOS_FILE = BASE_CACHE_DIR / "usuarios.json"
-
-
-def _hash_password(password: str, salt: str) -> str:
-    return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-
-
-def cargar_usuarios() -> dict:
-    if not USUARIOS_FILE.exists():
-        return {}
-    try:
-        return json.loads(USUARIOS_FILE.read_text())
-    except Exception:
-        return {}
-
-
-def guardar_usuarios(usuarios: dict):
-    BASE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    USUARIOS_FILE.write_text(json.dumps(usuarios, ensure_ascii=False, indent=2))
-
-
-def nombre_usuario_valido(usuario: str) -> bool:
-    """Evita nombres de usuario que puedan usarse para 'escapar' de su propia carpeta."""
-    return bool(usuario) and all(c.isalnum() or c in ("_", "-", ".") for c in usuario)
-
-
-def crear_usuario(usuario: str, password: str) -> tuple[bool, str]:
-    usuario = usuario.strip()
-    if not usuario or not password:
-        return False, "El usuario y la contraseña no pueden estar vacíos."
-    if not nombre_usuario_valido(usuario):
-        return False, "El usuario solo puede contener letras, números, '_', '-' o '.'."
-    if len(password) < 4:
-        return False, "La contraseña debe tener al menos 4 caracteres."
-    usuarios = cargar_usuarios()
-    if usuario in usuarios:
-        return False, "Ese nombre de usuario ya existe."
-    salt = secrets.token_hex(8)
-    usuarios[usuario] = {"salt": salt, "hash": _hash_password(password, salt)}
-    guardar_usuarios(usuarios)
-    return True, "Cuenta creada correctamente. Ahora puede iniciar sesión."
-
-
-def validar_login(usuario: str, password: str) -> bool:
-    usuarios = cargar_usuarios()
-    datos = usuarios.get(usuario.strip())
-    if not datos:
-        return False
-    return _hash_password(password, datos["salt"]) == datos["hash"]
-
-
-if "usuario" not in st.session_state:
-    st.session_state.usuario = None
-
-if not st.session_state.usuario:
-    st.title("📊 Plataforma de Reportes y Análisis de Datos")
-    st.subheader("🔐 Inicie sesión para continuar")
-    st.caption(
-        "Cada usuario ve únicamente sus propios archivos guardados y su propio historial. "
-        "No es necesario un rol especial, solo un usuario y una contraseña para identificarlo."
-    )
-
-    tab_login, tab_registro = st.tabs(["Iniciar sesión", "Crear cuenta"])
-
-    with tab_login:
-        with st.form("form_login"):
-            usuario_input = st.text_input("Usuario")
-            password_input = st.text_input("Contraseña", type="password")
-            enviar = st.form_submit_button("Entrar")
-            if enviar:
-                if validar_login(usuario_input, password_input):
-                    st.session_state.usuario = usuario_input.strip()
-                    st.rerun()
-                else:
-                    st.error("Usuario o contraseña incorrectos.")
-
-    with tab_registro:
-        with st.form("form_registro"):
-            nuevo_usuario = st.text_input("Elija un nombre de usuario")
-            nueva_password = st.text_input("Elija una contraseña", type="password")
-            confirmar_password = st.text_input("Confirme la contraseña", type="password")
-            crear = st.form_submit_button("Crear cuenta")
-            if crear:
-                if nueva_password != confirmar_password:
-                    st.error("Las contraseñas no coinciden.")
-                else:
-                    ok, mensaje = crear_usuario(nuevo_usuario, nueva_password)
-                    if ok:
-                        st.success(mensaje)
-                    else:
-                        st.error(mensaje)
-
-    st.stop()
-
-usuario_actual = st.session_state.usuario
-
-# Si dentro de la misma pestaña del navegador se cambia de usuario (cerrar sesión
-# y entrar con otro), se limpia lo que estaba en memoria para que no se mezclen
-# los archivos/gráficos de un usuario con los de otro mientras se recarga desde disco.
-if st.session_state.get("_usuario_cache_previo") != usuario_actual:
-    st.session_state.archivos_originales = {}
-    st.session_state.datasets = {}
-    st.session_state.graficos = []
-    st.session_state.datasets_seleccionados = []
-    st.session_state.editando_grafico = None
-    st.session_state["_usuario_cache_previo"] = usuario_actual
-
-
 st.title("📊 Plataforma de Reportes y Análisis de Datos")
 
 st.markdown("""
@@ -196,21 +73,14 @@ with st.expander("GUIA RAPIDA DE USO"):
        (por ejemplo, uno de un archivo Excel y otro de un archivo CSV distinto). Cada dataset tiene su
        propia pestaña con sus propios filtros e indicadores.
     4. Revise las advertencias de calidad de datos antes de interpretar los indicadores.
-    5. Use los filtros de cada dataset (categorías, fechas, rango numérico, búsqueda de texto u
-       ocultar columnas). Si quiere empezar de nuevo, use el botón **"Quitar todos los filtros"**.
-    6. Agregue uno o **varios gráficos**, cada uno puede usar un dataset distinto (se grafican los datos
-       ya filtrados). Cada gráfico se puede **duplicar**, **editar** (cambiar ejes, tipo, título, orden
-       o paleta de colores) o **eliminar** en cualquier momento.
-    7. Descargue el reporte en Excel, CSV o PDF. El reporte **combina los datos filtrados de todos los
+    5. Agregue uno o **varios gráficos**, cada uno puede usar un dataset distinto (se grafican los datos
+       ya filtrados).
+    6. Descargue el reporte en Excel, CSV o PDF. El reporte **combina los datos filtrados de todos los
        datasets elegidos en el paso 3** (una hoja por dataset en Excel, una sección por dataset en PDF),
        y los archivos Excel y PDF **incluyen los gráficos** generados, con **todas las filas** (no solo una muestra).
        En el PDF, el o los gráficos de cada dataset aparecen justo después de su tabla de datos filtrados.
-    8. Su sesión se guarda automáticamente **y queda asociada a su usuario**. Si cierra la app, al volver a
-       abrirla e iniciar sesión con el mismo usuario puede pulsar **"Cargar última sesión"** para recuperar
-       los archivos y gráficos en los que estaba trabajando.
-    9. Además, cada vez que presiona **"Guardar ahora"** se crea una **nueva entrada en su historial**
-       (con fecha, hora, minuto y segundo). Puede volver a cargar cualquiera de esos momentos guardados
-       desde la barra lateral, en **"Historial de guardados"**. Cada usuario ve únicamente su propio historial.
+    7. Su sesión se guarda automáticamente. Si cierra la app, al volver a abrirla puede pulsar
+       **"Cargar última sesión"** para recuperar los archivos y gráficos en los que estaba trabajando.
 
     **Columnas admitidas:** cualquier nombre de columna funciona; no es necesario que se llame
     exactamente "Categoria" o "Total". El sistema detecta automáticamente columnas categóricas,
@@ -235,29 +105,12 @@ if not FPDF_DISPONIBLE or not DOCX_DISPONIBLE or not PDFPLUMBER_DISPONIBLE or no
 
 
 # ====================================
-# PERSISTENCIA DE SESIÓN (separada por usuario)
+# PERSISTENCIA DE SESIÓN
 # ====================================
-#
-# Hay dos mecanismos independientes:
-#
-# 1) AUTOGUARDADO ("última sesión"): se sobrescribe automáticamente en varios
-#    puntos del flujo (al subir archivos, al agregar/quitar gráficos, al final
-#    de cada ejecución) para poder recuperar el trabajo si se cierra la app.
-#
-# 2) HISTORIAL DE GUARDADOS MANUALES: se crea una entrada NUEVA (no se
-#    sobrescribe ninguna anterior) cada vez que el usuario presiona el botón
-#    "Guardar ahora". Cada entrada queda con su fecha y hora exacta
-#    (día/mes/año hora:minuto:segundo) y puede cargarse de forma independiente.
-#
-# Ambos mecanismos viven dentro de una carpeta exclusiva del usuario que inició
-# sesión (BASE_CACHE_DIR/usuarios_datos/<usuario>/...), de modo que lo que un
-# usuario guarda o borra nunca afecta a los demás.
 
-CACHE_DIR = BASE_CACHE_DIR / "usuarios_datos" / usuario_actual
+CACHE_DIR = Path(".cache_reportes")
 CACHE_ARCHIVOS_DIR = CACHE_DIR / "archivos"
 META_PATH = CACHE_DIR / "sesion.json"
-
-HISTORIAL_DIR = CACHE_DIR / "historial"
 
 
 def hay_sesion_guardada() -> bool:
@@ -265,7 +118,7 @@ def hay_sesion_guardada() -> bool:
 
 
 def guardar_sesion():
-    """Autoguardado: sobrescribe la 'última sesión' del usuario actual con el estado actual."""
+    """Guarda en disco los archivos originales y la configuración actual (CP-persistencia)."""
     try:
         CACHE_ARCHIVOS_DIR.mkdir(parents=True, exist_ok=True)
         for nombre, info in st.session_state.archivos_originales.items():
@@ -288,7 +141,6 @@ def guardar_sesion():
 
 
 def cargar_sesion():
-    """Carga la 'última sesión' autoguardada del usuario actual."""
     if not META_PATH.exists():
         return
     try:
@@ -309,7 +161,6 @@ def cargar_sesion():
 
 
 def borrar_sesion_guardada():
-    """Borra únicamente el autoguardado de 'última sesión' del usuario actual (no toca el historial)."""
     try:
         if META_PATH.exists():
             META_PATH.unlink()
@@ -320,100 +171,21 @@ def borrar_sesion_guardada():
         st.sidebar.warning(f"No fue posible borrar la sesión guardada: {e}")
 
 
-# ---- Historial de guardados manuales (por usuario) ----
+# ====================================
+# REINICIAR APLICACIÓN
+# ====================================
 
-def guardar_historial() -> str | None:
-    """
-    Crea una NUEVA entrada en el historial de guardados del usuario actual (nunca
-    sobrescribe las anteriores, ni las de otros usuarios). Se usa exclusivamente
-    cuando el usuario presiona "Guardar ahora". El identificador de la entrada
-    incluye fecha, hora, minuto, segundo y microsegundos (para evitar colisiones
-    si se guarda dos veces muy seguido).
-    """
-    try:
-        HISTORIAL_DIR.mkdir(parents=True, exist_ok=True)
-        ahora = datetime.now()
-        id_guardado = ahora.strftime("%Y%m%d_%H%M%S_%f")
-        carpeta = HISTORIAL_DIR / id_guardado
-        carpeta_archivos = carpeta / "archivos"
-        carpeta_archivos.mkdir(parents=True, exist_ok=True)
-
-        for nombre, info in st.session_state.archivos_originales.items():
-            (carpeta_archivos / nombre).write_bytes(info["bytes"])
-
-        meta = {
-            "id": id_guardado,
-            "fecha": ahora.strftime("%d/%m/%Y %H:%M:%S"),
-            "archivos": [
-                {"nombre": nombre, "tipo": info["tipo"]}
-                for nombre, info in st.session_state.archivos_originales.items()
-            ],
-            "graficos": st.session_state.graficos,
-            "datasets_seleccionados": st.session_state.get("datasets_seleccionados", []),
-        }
-        (carpeta / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-        return id_guardado
-    except Exception as e:
-        st.sidebar.warning(f"No fue posible guardar en el historial: {e}")
-        return None
-
-
-def listar_historial() -> list:
-    """Devuelve la lista de guardados manuales DEL USUARIO ACTUAL, del más reciente al más antiguo."""
-    if not HISTORIAL_DIR.exists():
-        return []
-    entradas = []
-    for carpeta in HISTORIAL_DIR.iterdir():
-        meta_path = carpeta / "meta.json"
-        if meta_path.exists():
-            try:
-                entradas.append(json.loads(meta_path.read_text()))
-            except Exception:
-                continue
-    entradas.sort(key=lambda m: m.get("id", ""), reverse=True)
-    return entradas
-
-
-def cargar_desde_historial(id_guardado: str):
-    """Reemplaza el estado actual por el de una entrada específica del historial del usuario actual."""
-    carpeta = HISTORIAL_DIR / id_guardado
-    meta_path = carpeta / "meta.json"
-    if not meta_path.exists():
-        return
-    try:
-        meta = json.loads(meta_path.read_text())
-    except Exception:
-        return
-
+def empezar_de_cero():
     st.session_state.archivos_originales = {}
-    for archivo_meta in meta.get("archivos", []):
-        nombre = archivo_meta["nombre"]
-        ruta = carpeta / "archivos" / nombre
-        if ruta.exists():
-            st.session_state.archivos_originales[nombre] = {
-                "bytes": ruta.read_bytes(),
-                "tipo": archivo_meta["tipo"],
-            }
-    st.session_state.graficos = meta.get("graficos", [])
-    st.session_state.datasets_seleccionados = meta.get("datasets_seleccionados", [])
+    st.session_state.datasets = {}
+    st.session_state.graficos = []
+    st.session_state.datasets_seleccionados = []
+
+    st.session_state.uploader_key += 1
+    borrar_sesion_guardada()
+    st.session_state.confirmar_reinicio = False
 
 
-def borrar_entrada_historial(id_guardado: str):
-    try:
-        carpeta = HISTORIAL_DIR / id_guardado
-        if carpeta.exists():
-            shutil.rmtree(carpeta)
-    except Exception as e:
-        st.sidebar.warning(f"No fue posible borrar ese guardado: {e}")
-
-
-def borrar_historial_completo():
-    """Borra únicamente el historial del usuario actual, sin afectar el de otros usuarios."""
-    try:
-        if HISTORIAL_DIR.exists():
-            shutil.rmtree(HISTORIAL_DIR)
-    except Exception as e:
-        st.sidebar.warning(f"No fue posible borrar el historial: {e}")
 
 
 # ====================================
@@ -428,12 +200,22 @@ if "graficos" not in st.session_state:
     st.session_state.graficos = []                # lista de dicts {id, dataset, eje_x, eje_y, tipo}
 if "datasets_seleccionados" not in st.session_state:
     st.session_state.datasets_seleccionados = []   # lista de nombres de dataset incluidos en el reporte
-if "editando_grafico" not in st.session_state:
-    st.session_state.editando_grafico = None       # id del gráfico actualmente en edición, o None
+
+if "confirmar_reinicio" not in st.session_state:   # Variables para reiniciar la aplicación
+    st.session_state.confirmar_reinicio = False
+
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
+if "archivo_a_quitar" not in st.session_state:
+    st.session_state.archivo_a_quitar = None
 
 
-# Ofrecer recuperar la sesión anterior del usuario actual si aún no hay archivos cargados en esta sesión
-if not st.session_state.archivos_originales and hay_sesion_guardada():
+
+
+
+# Ofrecer recuperar la sesión anterior si aún no hay archivos cargados en esta sesión
+if hay_sesion_guardada():
     with st.sidebar:
         st.markdown("### 🕒 Sesión anterior detectada")
         try:
@@ -449,53 +231,30 @@ if not st.session_state.archivos_originales and hay_sesion_guardada():
             st.rerun()
 
 with st.sidebar:
-    st.markdown(f"### 👤 {usuario_actual}")
-    if st.button("Cerrar sesión"):
-        st.session_state.usuario = None
-        st.rerun()
-
     st.markdown("### 💾 Gestión de sesión")
     col_guardar, col_borrar = st.columns(2)
     with col_guardar:
         if st.button("Guardar ahora"):
-            guardar_sesion()          # actualiza la 'última sesión' del usuario actual
-            id_nuevo = guardar_historial()  # crea una entrada nueva en el historial del usuario actual
-            if id_nuevo:
-                st.success("Sesión guardada y agregada al historial.")
+            guardar_sesion()
+            st.success("Sesión guardada.")
     with col_borrar:
         if st.button("Borrar guardada"):
             borrar_sesion_guardada()
             st.success("Sesión guardada eliminada.")
 
-    st.markdown("### 🕒 Historial de guardados")
-    historial = listar_historial()
-    if not historial:
-        st.caption("Todavía no hay guardados en el historial. Use 'Guardar ahora' para crear el primero.")
-    else:
-        st.caption(f"{len(historial)} guardado(s) disponible(s).")
-        for entrada in historial:
-            n_archivos = len(entrada.get("archivos", []))
-            with st.expander(f"🕓 {entrada.get('fecha', '?')}  ({n_archivos} archivo(s))"):
-                nombres_archivos = ", ".join(a["nombre"] for a in entrada.get("archivos", []))
-                if nombres_archivos:
-                    st.caption(nombres_archivos)
-                col_cargar, col_eliminar = st.columns(2)
-                with col_cargar:
-                    if st.button("🔄 Cargar", key=f"cargar_hist_{entrada['id']}"):
-                        cargar_desde_historial(entrada["id"])
-                        st.rerun()
-                with col_eliminar:
-                    if st.button("🗑️ Eliminar", key=f"borrar_hist_{entrada['id']}"):
-                        borrar_entrada_historial(entrada["id"])
-                        st.rerun()
-        if st.button("Vaciar historial completo"):
-            borrar_historial_completo()
-            st.rerun()
-
 
 # ====================================
 # FUNCIONES AUXILIARES DE LECTURA / CALIDAD DE DATOS
 # ====================================
+
+# Muestra el tamaño del archivo
+def obtener_tamano_archivo(cantidad_bytes: int) -> str:
+    if cantidad_bytes < 1024 * 1024:
+        tamano = cantidad_bytes / 1024
+        return f"{tamano:.2f} KB - Archivo pequeño"
+
+    tamano = cantidad_bytes / (1024 * 1024)
+    return f"{tamano:.2f} MB - Archivo grande"
 
 def normalizar_nombre(col: str) -> str:
     """Normaliza un nombre de columna para comparaciones flexibles."""
@@ -570,6 +329,13 @@ def validar_calidad_datos(df: pd.DataFrame) -> list:
         advertencias.append("El archivo no contiene registros (está vacío).")
         return advertencias
 
+    filas_duplicadas = df.duplicated().sum()
+
+    if filas_duplicadas > 0:
+        advertencias.append(
+        f"Se encontraron {filas_duplicadas} fila(s) duplicada(s)."
+    )
+
     filas_totalmente_vacias = df.isna().all(axis=1).sum()
     if filas_totalmente_vacias > 0:
         advertencias.append(f"Se encontraron {filas_totalmente_vacias} fila(s) completamente vacía(s).")
@@ -591,25 +357,6 @@ def validar_calidad_datos(df: pd.DataFrame) -> list:
                 advertencias.append(f"La columna '{col}' tiene {n_futuras} fecha(s) posterior(es) a hoy (posible inconsistencia).")
 
     return advertencias
-
-
-def limpiar_filtros_dataset(nombre_ds: str):
-    """
-    Borra del estado de sesión todos los widgets de filtro de este dataset
-    (categóricos, fecha, rango numérico, búsqueda de texto, columnas ocultas)
-    para que vuelvan a su valor por defecto.
-    """
-    prefijos = (
-        f"filtro_{nombre_ds}_",
-        f"fecha_{nombre_ds}_",
-        f"rango_num_{nombre_ds}_",
-        f"busqueda_col_{nombre_ds}",
-        f"busqueda_texto_{nombre_ds}",
-        f"ocultar_cols_{nombre_ds}",
-    )
-    claves_a_borrar = [k for k in st.session_state.keys() if k.startswith(prefijos)]
-    for k in claves_a_borrar:
-        del st.session_state[k]
 
 
 # ====================================
@@ -729,16 +476,6 @@ def leer_sub_dataset(nombre: str, info: dict, etiqueta, fila_encabezado: int = 0
 
 PALETA_COLORES = px.colors.qualitative.Plotly  # paleta de colores explícita para forzar color en la exportación
 
-# Paletas de colores seleccionables por el usuario para cada gráfico
-PALETAS_DISPONIBLES = {
-    "Plotly (predeterminada)": px.colors.qualitative.Plotly,
-    "Pastel": px.colors.qualitative.Pastel,
-    "Vivid": px.colors.qualitative.Vivid,
-    "Set2": px.colors.qualitative.Set2,
-    "Bold": px.colors.qualitative.Bold,
-    "Safe": px.colors.qualitative.Safe,
-}
-
 # Tamaño de embebido de cada gráfico en la hoja "Graficos" del Excel (en píxeles).
 # Se fija explícitamente para que las imágenes no se dibujen "a tamaño completo" (lo que
 # provocaba que unas taparan a otras); a partir de este tamaño se calcula cuántas filas
@@ -816,13 +553,12 @@ def _dibujar_grafico_pdf(pdf: "FPDF", titulo: str, img_bytes: bytes):
         pdf.cell(0, 8, "(No fue posible incrustar este gráfico)", ln=True)
 
 
-def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin_dataset: list | None = None, notas: str = "") -> bytes:
+def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin_dataset: list | None = None) -> bytes:
     """
     Genera un PDF con, para CADA dataset incluido en el reporte:
     sus KPIs, la TABLA COMPLETA de datos filtrados (paginada, sin límite de filas) y,
     justo después de la tabla, el/los gráfico(s) que usan ese dataset (cada uno en su
-    propia página, para que se vea grande y legible). También incorpora las notas al
-    inicio si el usuario las agregó.
+    propia página, para que se vea grande y legible).
 
     datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
     imagenes_por_dataset: {nombre_dataset: [(titulo, bytes_png), ...]}
@@ -837,14 +573,6 @@ def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 6, f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True)
     pdf.ln(2)
-
-    # Inyección de las notas/comentarios si el usuario las agregó
-    if notas:
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 8, "Notas y Comentarios:", ln=True)
-        pdf.set_font("Helvetica", "", 10)
-        pdf.multi_cell(0, 6, notas)
-        pdf.ln(4)
 
     for nombre_dataset, contenido in datasets_reporte.items():
         df = contenido["df"]
@@ -897,12 +625,11 @@ def _nombre_hoja_valido(nombre: str, usados: set) -> str:
     return candidato
 
 
-def generar_excel(datasets_reporte: dict, imagenes_graficos: list, notas: str = "") -> bytes:
+def generar_excel(datasets_reporte: dict, imagenes_graficos: list) -> bytes:
     """
     Genera un Excel con UNA HOJA POR CADA dataset incluido en el reporte (datos filtrados),
-    una hoja "Notas" (si el usuario escribió alguna), una hoja "Indicadores" combinada y una
-    hoja "Graficos" con los gráficos incrustados, cada uno con un tamaño fijo y suficiente
-    espacio vertical para que no se superpongan.
+    una hoja "Indicadores" combinada y una hoja "Graficos" con los gráficos incrustados,
+    cada uno con un tamaño fijo y suficiente espacio vertical para que no se superpongan.
 
     datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
     imagenes_graficos: [(titulo, bytes_png, nombre_dataset), ...]
@@ -911,11 +638,6 @@ def generar_excel(datasets_reporte: dict, imagenes_graficos: list, notas: str = 
     nombres_hoja_usados = set()
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        # Pestaña de Notas (se coloca al principio si existe)
-        if notas:
-            df_notas = pd.DataFrame({"Notas / Comentarios del Reporte": [notas]})
-            df_notas.to_excel(writer, sheet_name="Notas", index=False)
-
         filas_kpis = []
         for nombre_dataset, contenido in datasets_reporte.items():
             hoja = _nombre_hoja_valido(nombre_dataset, nombres_hoja_usados)
@@ -957,7 +679,27 @@ archivos_subidos = st.file_uploader(
     "Seleccione uno o varios archivos (puede arrastrar varios a la vez, o agregar más después)",
     type=["xlsx", "xls", "csv", "docx", "pdf", "db", "sqlite", "sqlite3"],
     accept_multiple_files=True,
+    key=f"cargador_{st.session_state.uploader_key}",
 )
+
+if not st.session_state.confirmar_reinicio:
+    if st.button("Empezar de cero"):
+        st.session_state.confirmar_reinicio = True
+        st.rerun()
+else:
+    st.warning("¿Está seguro de que desea borrar todos los datos cargados?")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Sí, borrar todo"):
+            empezar_de_cero()
+            st.rerun()
+
+    with col2:
+        if st.button("Cancelar"):
+            st.session_state.confirmar_reinicio = False
+            st.rerun()
 
 if archivos_subidos:
     for archivo in archivos_subidos:
@@ -987,16 +729,46 @@ st.subheader("2. Archivos cargados")
 nuevos_datasets = {}
 
 for nombre, info in list(st.session_state.archivos_originales.items()):
-    with st.expander(f"📄 {nombre}  ({info['tipo'].upper()})", expanded=True):
+    tamano_archivo = obtener_tamano_archivo(len(info["bytes"]))
+
+    with st.expander(
+        f"📄 {nombre} ({info['tipo'].upper()}) - {tamano_archivo}",
+        expanded=True
+    ):
+
         col_info, col_quitar = st.columns([5, 1])
+
         with col_quitar:
-            if st.button("🗑️ Quitar", key=f"quitar_{nombre}"):
-                del st.session_state.archivos_originales[nombre]
-                st.session_state.datasets_seleccionados = [
-                    d for d in st.session_state.datasets_seleccionados if not d.startswith(nombre)
-                ]
-                guardar_sesion()
-                st.rerun()
+            if st.session_state.archivo_a_quitar == nombre:
+                st.warning("¿Está seguro?")
+
+                if st.button("Sí, quitar", key=f"confirmar_quitar_{nombre}"):
+                     del st.session_state.archivos_originales[nombre]
+
+                     st.session_state.datasets_seleccionados = [
+                        d
+                        for d in st.session_state.datasets_seleccionados
+                        if not d.startswith(nombre)
+                    ]
+
+                     st.session_state.archivo_a_quitar = None
+
+                    # Limpia el cargador para que el archivo no se vuelva a agregar
+                     st.session_state.uploader_key += 1
+
+                     guardar_sesion()
+                     st.rerun()
+
+                     st.session_state.uploader_key += 1
+
+                if st.button("Cancelar", key=f"cancelar_quitar_{nombre}"):
+                    st.session_state.archivo_a_quitar = None
+                    st.rerun()
+
+            else:
+                if st.button("🗑️ Quitar", key=f"quitar_{nombre}"):
+                    st.session_state.archivo_a_quitar = nombre
+                    st.rerun()
 
         tipo = info["tipo"]
 
@@ -1113,56 +885,8 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
         st.markdown("**Vista previa**")
         st.dataframe(datos, use_container_width=True)
 
-        def _resetear_filtros_callback(nombre_ds=nombre_ds, datos=datos):
-            columnas_categoricas_r = [
-                c for c in datos.columns
-                if (pd.api.types.is_object_dtype(datos[c]) or pd.api.types.is_string_dtype(datos[c]) or str(datos[c].dtype) == "category")
-                and datos[c].nunique(dropna=True) <= 50
-            ]
-            for col in columnas_categoricas_r:
-                valores = sorted(datos[col].dropna().unique().tolist())
-                st.session_state[f"filtro_{nombre_ds}_{col}"] = valores
-
-            columnas_fecha_r = [c for c in datos.columns if pd.api.types.is_datetime64_any_dtype(datos[c])]
-            for col in columnas_fecha_r:
-                col_valida = datos[col].dropna()
-                if col_valida.empty:
-                    continue
-                fmin, fmax = col_valida.min().date(), col_valida.max().date()
-                if fmin == fmax:
-                    continue
-                st.session_state[f"fecha_{nombre_ds}_{col}"] = (fmin, fmax)
-
-            columnas_numericas_r = datos.select_dtypes(include="number").columns.tolist()
-            for col in columnas_numericas_r:
-                col_valida = datos[col].dropna()
-                if col_valida.empty:
-                    continue
-                rmin, rmax = int(col_valida.min()), int(col_valida.max())
-                if rmin == rmax:
-                    continue
-                st.session_state[f"rango_num_{nombre_ds}_{col}"] = (rmin, rmax)
-
-            columnas_texto_r = [
-                c for c in datos.columns
-                if pd.api.types.is_object_dtype(datos[c]) or pd.api.types.is_string_dtype(datos[c]) or str(datos[c].dtype) == "category"
-            ]
-            if columnas_texto_r:
-                st.session_state[f"busqueda_col_{nombre_ds}"] = columnas_texto_r[0]
-            st.session_state[f"busqueda_texto_{nombre_ds}"] = ""
-            st.session_state[f"ocultar_cols_{nombre_ds}"] = []
-
         # --- Filtros propios de este dataset ---
-        col_titulo_filtros, col_boton_reset = st.columns([4, 1])
-        with col_titulo_filtros:
-            st.markdown("**Filtros**")
-        with col_boton_reset:
-            st.button(
-                "🧹 Quitar todos los filtros",
-                key=f"reset_{nombre_ds}",
-                on_click=_resetear_filtros_callback,
-            )
-
+        st.markdown("**Filtros**")
         datos_filtrados = datos.copy()
 
         columnas_categoricas = [
@@ -1202,60 +926,8 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
                     (datos_filtrados[col].dt.date >= rango[0]) & (datos_filtrados[col].dt.date <= rango[1])
                 ]
 
-        # Filtro por rango numérico
-        columnas_numericas_filtro = datos.select_dtypes(include="number").columns.tolist()
-        if columnas_numericas_filtro:
-            with st.expander("Filtrar por rango numérico"):
-                columnas_rango_ui = st.columns(min(3, len(columnas_numericas_filtro)))
-                for i, col in enumerate(columnas_numericas_filtro):
-                    col_valida = datos[col].dropna()
-                    if col_valida.empty:
-                        continue
-                    minimo, maximo = int(col_valida.min()), int(col_valida.max())
-                    if minimo == maximo:
-                        continue
-                    with columnas_rango_ui[i % len(columnas_rango_ui)]:
-                        rango_num = st.slider(
-                            f"{col}", min_value=minimo, max_value=maximo,
-                            value=(minimo, maximo), key=f"rango_num_{nombre_ds}_{col}"
-                        )
-                    datos_filtrados = datos_filtrados[
-                        (datos_filtrados[col] >= rango_num[0]) & (datos_filtrados[col] <= rango_num[1])
-                    ]
-
-        # Búsqueda de una palabra dentro de una columna
-        columnas_texto_busqueda = [
-            c for c in datos.columns
-            if datos[c].dtype == "object" or str(datos[c].dtype) == "category"
-        ]
-        if columnas_texto_busqueda:
-            with st.expander("Buscar palabra en una columna"):
-                col_busq_1, col_busq_2 = st.columns(2)
-                with col_busq_1:
-                    columna_busqueda = st.selectbox(
-                        "Columna", columnas_texto_busqueda, key=f"busqueda_col_{nombre_ds}"
-                    )
-                with col_busq_2:
-                    texto_busqueda = st.text_input(
-                        "Palabra o texto a buscar", key=f"busqueda_texto_{nombre_ds}"
-                    )
-                if texto_busqueda:
-                    datos_filtrados = datos_filtrados[
-                        datos_filtrados[columna_busqueda]
-                        .astype(str)
-                        .str.contains(texto_busqueda, case=False, na=False)
-                    ]
-
         if datos_filtrados.empty:
             st.warning("Los filtros seleccionados no arrojan ningún registro para este dataset.")
-
-        # Ocultar columnas
-        columnas_a_ocultar = st.multiselect(
-            "Ocultar columnas (no se muestran ni se incluyen en la tabla/reporte de este dataset)",
-            datos.columns.tolist(), default=[], key=f"ocultar_cols_{nombre_ds}"
-        )
-        if columnas_a_ocultar:
-            datos_filtrados = datos_filtrados.drop(columns=columnas_a_ocultar)
 
         # --- Indicadores propios de este dataset ---
         st.markdown("**Indicadores**")
@@ -1270,16 +942,30 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
             promedio = datos_filtrados[columna_indicador].mean()
             registros = len(datos_filtrados)
 
+            minimo = datos_filtrados[columna_indicador].min()
+            maximo = datos_filtrados[columna_indicador].max()
+            mediana = datos_filtrados[columna_indicador].median()
+
             c1, c2, c3 = st.columns(3)
             c1.metric("Total", f"{total:,.2f}")
             c2.metric("Promedio", f"{promedio:,.2f}")
             c3.metric("Registros", registros)
 
+            c4, c5, c6 = st.columns(3)
+            c4.metric("Mínimo", f"{minimo:,.2f}")
+            c5.metric("Máximo", f"{maximo:,.2f}")
+            c6.metric("Mediana", f"{mediana:,.2f}")
+
             kpis_dataset = {
                 "Columna analizada": columna_indicador,
                 "Total": f"{total:,.2f}",
                 "Promedio": f"{promedio:,.2f}",
+                "Mínimo": f"{minimo:,.2f}",
+                "Máximo": f"{maximo:,.2f}",
+                "Mediana": f"{mediana:,.2f}",
                 "Registros": registros,
+
+
             }
         else:
             st.caption("No hay columnas numéricas disponibles, o los filtros actuales no dejan registros.")
@@ -1317,26 +1003,6 @@ else:
             eje_y_nuevo = st.selectbox("Eje Y (numérico)", columnas_num_grafico, key="nuevo_eje_y")
         with col_tipo:
             tipo_nuevo = st.selectbox("Tipo de gráfico", ["Barras", "Pastel", "Líneas", "Dispersión"], key="nuevo_tipo")
-
-        titulo_nuevo = st.text_input(
-            "Título del gráfico (opcional — si se deja vacío se genera uno automático)",
-            key="nuevo_titulo",
-        )
-
-        col_orden, col_paleta = st.columns(2)
-        with col_orden:
-            orden_nuevo = st.selectbox(
-                "Orden de los datos",
-                ["Sin ordenar", "Mayor a menor", "Menor a mayor"],
-                key="nuevo_orden",
-            )
-        with col_paleta:
-            paleta_nueva = st.selectbox(
-                "Paleta de colores",
-                list(PALETAS_DISPONIBLES.keys()),
-                key="nueva_paleta",
-            )
-
         agregar = st.form_submit_button("➕ Agregar gráfico")
         if agregar:
             st.session_state.graficos.append({
@@ -1345,9 +1011,6 @@ else:
                 "eje_x": eje_x_nuevo,
                 "eje_y": eje_y_nuevo,
                 "tipo": tipo_nuevo,
-                "titulo": titulo_nuevo.strip(),
-                "orden": orden_nuevo,
-                "paleta": paleta_nueva,
             })
             guardar_sesion()
             st.rerun()
@@ -1373,89 +1036,6 @@ else:
             st.info(f"'{g['dataset']}' no tiene registros con los filtros actuales; este gráfico se omite.")
             continue
 
-        # Valores con .get() para no romper gráficos guardados de sesiones anteriores
-        # a esta actualización (que no tenían título/orden/paleta propios).
-        titulo_personalizado = (g.get("titulo") or "").strip()
-        orden_grafico = g.get("orden", "Sin ordenar")
-        nombre_paleta = g.get("paleta", "Plotly (predeterminada)")
-        paleta_grafico = PALETAS_DISPONIBLES.get(nombre_paleta, PALETA_COLORES)
-
-        # Detecta si este gráfico está actualmente en modo edición
-        esta_editando = st.session_state.get("editando_grafico") == g["id"]
-
-        if esta_editando:
-            st.markdown(f"**✏️ Editando gráfico** _(dataset: {g['dataset']})_")
-            with st.form(f"form_editar_{g['id']}"):
-                col_ex, col_ey, col_t = st.columns(3)
-                columnas_disp = df_g.columns.tolist()
-                columnas_num_disp = df_g.select_dtypes(include="number").columns.tolist()
-
-                with col_ex:
-                    idx_x = columnas_disp.index(g["eje_x"]) if g["eje_x"] in columnas_disp else 0
-                    eje_x_edit = st.selectbox(
-                        "Eje X", columnas_disp, index=idx_x, key=f"editar_eje_x_{g['id']}"
-                    )
-                with col_ey:
-                    idx_y = columnas_num_disp.index(g["eje_y"]) if g["eje_y"] in columnas_num_disp else 0
-                    eje_y_edit = st.selectbox(
-                        "Eje Y (numérico)", columnas_num_disp, index=idx_y, key=f"editar_eje_y_{g['id']}"
-                    )
-                with col_t:
-                    tipos_disp = ["Barras", "Pastel", "Líneas", "Dispersión"]
-                    idx_tipo = tipos_disp.index(g["tipo"]) if g["tipo"] in tipos_disp else 0
-                    tipo_edit = st.selectbox(
-                        "Tipo de gráfico", tipos_disp, index=idx_tipo, key=f"editar_tipo_{g['id']}"
-                    )
-
-                titulo_edit = st.text_input(
-                    "Título del gráfico (opcional — si se deja vacío se genera uno automático)",
-                    value=g.get("titulo", ""), key=f"editar_titulo_{g['id']}"
-                )
-
-                col_o, col_p = st.columns(2)
-                with col_o:
-                    ordenes_disp = ["Sin ordenar", "Mayor a menor", "Menor a mayor"]
-                    idx_orden = ordenes_disp.index(g.get("orden", "Sin ordenar"))
-                    orden_edit = st.selectbox(
-                        "Orden de los datos", ordenes_disp, index=idx_orden, key=f"editar_orden_{g['id']}"
-                    )
-                with col_p:
-                    paletas_disp = list(PALETAS_DISPONIBLES.keys())
-                    nombre_paleta_actual = g.get("paleta", "Plotly (predeterminada)")
-                    idx_paleta = paletas_disp.index(nombre_paleta_actual) if nombre_paleta_actual in paletas_disp else 0
-                    paleta_edit = st.selectbox(
-                        "Paleta de colores", paletas_disp, index=idx_paleta, key=f"editar_paleta_{g['id']}"
-                    )
-
-                col_guardar_edit, col_cancelar_edit = st.columns(2)
-                with col_guardar_edit:
-                    guardar_edicion = st.form_submit_button("💾 Guardar cambios")
-                with col_cancelar_edit:
-                    cancelar_edicion = st.form_submit_button("✖️ Cancelar")
-
-            if guardar_edicion:
-                for idx, gr in enumerate(st.session_state.graficos):
-                    if gr["id"] == g["id"]:
-                        st.session_state.graficos[idx] = {
-                            **gr,
-                            "eje_x": eje_x_edit,
-                            "eje_y": eje_y_edit,
-                            "tipo": tipo_edit,
-                            "titulo": titulo_edit.strip(),
-                            "orden": orden_edit,
-                            "paleta": paleta_edit,
-                        }
-                        break
-                st.session_state.editando_grafico = None
-                guardar_sesion()
-                st.rerun()
-            if cancelar_edicion:
-                st.session_state.editando_grafico = None
-                st.rerun()
-
-            st.divider()
-            continue  # no dibujar el gráfico normal mientras está en edición
-
         st.markdown(f"**{g['tipo']}** — {g['eje_y']} por {g['eje_x']}  _(dataset: {g['dataset']}, datos filtrados)_")
 
         try:
@@ -1467,47 +1047,26 @@ else:
                 resumen = df_g.groupby(g["eje_x"])[g["eje_y"]].sum().reset_index()
                 col_valor = g["eje_y"]
 
-            # Ordenar los datos según lo elegido
-            if orden_grafico == "Mayor a menor":
-                resumen = resumen.sort_values(by=col_valor, ascending=False)
-            elif orden_grafico == "Menor a mayor":
-                resumen = resumen.sort_values(by=col_valor, ascending=True)
-
-            color_principal = paleta_grafico[indice_color % len(paleta_grafico)]  # antes: PALETA_COLORES fijo
-            titulo_auto = f"{col_valor} por {g['eje_x']}"
-            titulo_final = titulo_personalizado if titulo_personalizado else titulo_auto
+            color_principal = PALETA_COLORES[indice_color % len(PALETA_COLORES)]
 
             if g["tipo"] == "Barras":
                 fig = px.bar(
-                    resumen, x=g["eje_x"], y=col_valor,
-                    title=titulo_final,
-                    color=g["eje_x"],
-                    color_discrete_sequence=paleta_grafico,
+                    resumen, x=g["eje_x"], y=col_valor, title=f"{col_valor} por {g['eje_x']}",
+                    color=g["eje_x"], color_discrete_sequence=PALETA_COLORES,
                 )
-                # Con orden explícito, se fija el orden de categorías del eje X para
-                # que el sort no lo pierda Plotly al colorear por categoría.
-                if orden_grafico != "Sin ordenar":
-                    fig.update_xaxes(categoryorder="array", categoryarray=resumen[g["eje_x"]].tolist())
             elif g["tipo"] == "Pastel":
-                titulo_pastel = titulo_personalizado if titulo_personalizado else f"Distribución de {col_valor}"
                 fig = px.pie(
-                    resumen, names=g["eje_x"], values=col_valor,
-                    title=titulo_pastel,
-                    color_discrete_sequence=paleta_grafico,
+                    resumen, names=g["eje_x"], values=col_valor, title=f"Distribución de {col_valor}",
+                    color_discrete_sequence=PALETA_COLORES,
                 )
             elif g["tipo"] == "Líneas":
                 fig = px.line(
-                    resumen, x=g["eje_x"], y=col_valor,
-                    title=titulo_final,
+                    resumen, x=g["eje_x"], y=col_valor, title=f"{col_valor} por {g['eje_x']}",
                     markers=True, color_discrete_sequence=[color_principal],
                 )
-                if orden_grafico != "Sin ordenar":
-                    fig.update_xaxes(categoryorder="array", categoryarray=resumen[g["eje_x"]].tolist())
             else:
-                titulo_dispersion = titulo_personalizado if titulo_personalizado else f"{g['eje_y']} vs {g['eje_x']}"
                 fig = px.scatter(
-                    df_g, x=g["eje_x"], y=g["eje_y"],
-                    title=titulo_dispersion,
+                    df_g, x=g["eje_x"], y=g["eje_y"], title=f"{g['eje_y']} vs {g['eje_x']}",
                     color_discrete_sequence=[color_principal],
                 )
 
@@ -1515,34 +1074,16 @@ else:
 
             imagen_png = fig_a_imagen_png(fig)
             if imagen_png:
-                titulo_grafico = f"{titulo_final} ({g['dataset']})" if titulo_personalizado else f"{g['tipo']} - {col_valor} por {g['eje_x']} ({g['dataset']})"
+                titulo_grafico = f"{g['tipo']} - {col_valor} por {g['eje_x']} ({g['dataset']})"
                 imagenes_graficos.append((titulo_grafico, imagen_png, g["dataset"]))
 
         except Exception as e:
             st.error(f"No fue posible generar este gráfico: {e}")
 
-        # Botones: Duplicar, Editar y Eliminar
-        col_dup, col_edit, col_del = st.columns(3)
-        with col_dup:
-            if st.button("📋 Duplicar este gráfico", key=f"dup_{g['id']}"):
-                nuevo_grafico = dict(g)
-                nuevo_grafico["id"] = f"g{len(st.session_state.graficos)}_{datetime.now().timestamp()}"
-                nombre_base = titulo_personalizado if titulo_personalizado else f"{g['tipo']} - {g['eje_y']} por {g['eje_x']}"
-                nuevo_grafico["titulo"] = f"{nombre_base} (copia)"
-                st.session_state.graficos.append(nuevo_grafico)
-                guardar_sesion()
-                st.rerun()
-        with col_edit:
-            if st.button("✏️ Editar este gráfico", key=f"editar_btn_{g['id']}"):
-                st.session_state.editando_grafico = g["id"]
-                st.rerun()
-        with col_del:
-            if st.button("🗑️ Eliminar este gráfico", key=f"del_{g['id']}"):
-                st.session_state.graficos = [x for x in st.session_state.graficos if x["id"] != g["id"]]
-                if st.session_state.get("editando_grafico") == g["id"]:
-                    st.session_state.editando_grafico = None
-                guardar_sesion()
-                st.rerun()
+        if st.button("🗑️ Eliminar este gráfico", key=f"del_{g['id']}"):
+            st.session_state.graficos = [x for x in st.session_state.graficos if x["id"] != g["id"]]
+            guardar_sesion()
+            st.rerun()
 
         st.divider()
 
@@ -1567,29 +1108,21 @@ for titulo, img_bytes, nombre_dataset_grafico in imagenes_graficos:
 
 st.subheader("5. Exportar Reporte")
 
-# 1. Resumen de la exportación
-total_filas = sum(len(c["df"]) for c in resultados_por_dataset.values())
-num_datasets = len(resultados_por_dataset)
-num_graficos = len(imagenes_graficos)
+st.caption(
+    "El reporte combina los datos FILTRADOS de los datasets elegidos en el paso 3: "
+    + ", ".join(datasets_seleccionados)
+)
 
-st.success(f"📋 **Resumen de Exportación:** Vas a exportar **{num_datasets}** dataset(s), **{total_filas}** filas en total y **{num_graficos}** gráfico(s).")
-
-# 2. Agregar Notas y Comentarios
-notas_reporte = st.text_area("📝 Notas o comentarios adicionales (se incluirán en el PDF y en el Excel global)", placeholder="Escribe aquí observaciones generales para el reporte...")
-
-# 3. Reporte Completo (Excel y PDF)
-st.markdown("### Descargar Reporte Completo (Todos los datasets)")
-col_excel, col_pdf = st.columns(2)
+col_excel, col_csv, col_pdf = st.columns(3)
 
 with col_excel:
     try:
-        buffer_excel = generar_excel(resultados_por_dataset, imagenes_graficos, notas=notas_reporte)
+        buffer_excel = generar_excel(resultados_por_dataset, imagenes_graficos)
         st.download_button(
-            label="📥 Descargar Reporte Global en Excel",
+            label="📥 Descargar Excel",
             data=buffer_excel,
-            file_name="Reporte_Global.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
+            file_name="Reporte.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.caption(f"Una hoja por dataset ({len(resultados_por_dataset)}).")
         if imagenes_graficos:
@@ -1597,64 +1130,41 @@ with col_excel:
     except Exception as e:
         st.error(f"No fue posible generar el Excel: {e}")
 
+with col_csv:
+    st.caption("El CSV no admite varias tablas: descargue un archivo por dataset.")
+    for nombre_ds in datasets_seleccionados:
+        df_export = resultados_por_dataset[nombre_ds]["df"]
+        try:
+            buffer_csv = df_export.to_csv(index=False).encode("utf-8-sig")
+            nombre_archivo = "Reporte_" + "".join(c for c in nombre_ds if c.isalnum())[:40] + ".csv"
+            st.download_button(
+                label=f"📥 CSV: {nombre_ds}",
+                data=buffer_csv,
+                file_name=nombre_archivo,
+                mime="text/csv",
+                key=f"csv_{nombre_ds}",
+            )
+        except Exception as e:
+            st.error(f"No fue posible generar el CSV de '{nombre_ds}': {e}")
+
 with col_pdf:
     if not FPDF_DISPONIBLE:
         st.caption("Para exportar a PDF instale la librería: pip install fpdf2")
     else:
         try:
-            pdf_bytes = generar_pdf(resultados_por_dataset, imagenes_por_dataset, imagenes_sin_dataset, notas=notas_reporte)
+            pdf_bytes = generar_pdf(resultados_por_dataset, imagenes_por_dataset, imagenes_sin_dataset)
             st.download_button(
-                label="📥 Descargar Reporte Global en PDF",
+                label="📥 Descargar PDF",
                 data=pdf_bytes,
-                file_name="Reporte_Global.pdf",
-                mime="application/pdf",
-                use_container_width=True
+                file_name="Reporte.pdf",
+                mime="application/pdf"
             )
-            st.caption(f"Incluye {total_filas} registro(s) en total (todas las filas, paginado automático).")
+            total_registros = sum(len(c["df"]) for c in resultados_por_dataset.values())
+            st.caption(f"Incluye {total_registros} registro(s) en total (todas las filas, paginado automático).")
             if imagenes_graficos:
                 st.caption(f"Incluye {len(imagenes_graficos)} gráfico(s), cada uno justo después de la tabla de su dataset.")
         except Exception as e:
             st.error(f"No fue posible generar el PDF: {e}")
-
-st.divider()
-
-# 4. Descargas Individuales (CSV y Excel para un solo dataset)
-st.markdown("### Descargas Individuales (Por Dataset)")
-st.caption("Puede descargar los datos filtrados de un dataset específico tanto en formato CSV como en Excel.")
-
-for nombre_ds in datasets_seleccionados:
-    df_export = resultados_por_dataset[nombre_ds]["df"]
-
-    # Preparar el archivo CSV
-    buffer_csv = df_export.to_csv(index=False).encode("utf-8-sig")
-    nombre_archivo_base = "".join(c for c in nombre_ds if c.isalnum())[:40]
-
-    # Preparar el archivo Excel del dataset individual
-    buffer_excel_individual = BytesIO()
-    with pd.ExcelWriter(buffer_excel_individual, engine="openpyxl") as writer:
-        df_export.to_excel(writer, sheet_name="Datos", index=False)
-    buffer_excel_individual_bytes = buffer_excel_individual.getvalue()
-
-    with st.expander(f"Descargar: {nombre_ds} ({len(df_export)} filas)"):
-        c_csv, c_xls = st.columns(2)
-        with c_csv:
-            st.download_button(
-                label=f"📥 CSV ({nombre_ds})",
-                data=buffer_csv,
-                file_name=f"Dataset_{nombre_archivo_base}.csv",
-                mime="text/csv",
-                key=f"csv_btn_{nombre_ds}",
-                use_container_width=True
-            )
-        with c_xls:
-            st.download_button(
-                label=f"📥 Excel ({nombre_ds})",
-                data=buffer_excel_individual_bytes,
-                file_name=f"Dataset_{nombre_archivo_base}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"xls_btn_{nombre_ds}",
-                use_container_width=True
-            )
 
 # Guardar la sesión al final de cada ejecución (archivos, gráficos, selección de datasets)
 guardar_sesion()
