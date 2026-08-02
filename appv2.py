@@ -1,5 +1,5 @@
 from __future__ import annotations  # compatibilidad de anotaciones de tipo con Python < 3.9
-
+ 
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -11,60 +11,60 @@ from collections import defaultdict
 import json
 import sqlite3
 import shutil
-
+ 
 # ====================================
 # DEPENDENCIAS OPCIONALES
 # ====================================
-
+ 
 try:
     from fpdf import FPDF
     FPDF_DISPONIBLE = True
 except ImportError:
     FPDF_DISPONIBLE = False
-
+ 
 try:
     import docx  # python-docx
     DOCX_DISPONIBLE = True
 except ImportError:
     DOCX_DISPONIBLE = False
-
+ 
 try:
     import pdfplumber
     PDFPLUMBER_DISPONIBLE = True
 except ImportError:
     PDFPLUMBER_DISPONIBLE = False
-
+ 
 try:
     from openpyxl.drawing.image import Image as OpenpyxlImage
     OPENPYXL_IMAGENES_DISPONIBLE = True
 except ImportError:
     OPENPYXL_IMAGENES_DISPONIBLE = False
-
+ 
 try:
     import kaleido  # noqa: F401  (necesario para exportar gráficos de plotly a imagen)
     KALEIDO_DISPONIBLE = True
 except ImportError:
     KALEIDO_DISPONIBLE = False
-
-
+ 
+ 
 # ====================================
 # CONFIGURACIÓN DE LA PÁGINA
 # ====================================
-
+ 
 st.set_page_config(
     page_title="Plataforma de Reportes",
     page_icon="📊",
     layout="wide"
 )
-
+ 
 st.title("📊 Plataforma de Reportes y Análisis de Datos")
-
+ 
 st.markdown("""
 Esta plataforma permite cargar **varios archivos a la vez**, en distintos formatos
 (Excel, CSV, Word, PDF y bases de datos SQLite), analizarlos, generar gráficos
 y exportar reportes que incluyen los gráficos generados.
 """)
-
+ 
 with st.expander("GUIA RAPIDA DE USO"):
     st.markdown("""
     1. Suba uno o **varios** archivos: **.xlsx**, **.xls**, **.csv**, **.docx**, **.pdf**, **.db/.sqlite**.
@@ -85,12 +85,12 @@ with st.expander("GUIA RAPIDA DE USO"):
     8. Además, cada vez que presiona **"Guardar ahora"** se crea una **nueva entrada en el historial**
        (con fecha, hora, minuto y segundo). Puede volver a cargar cualquiera de esos momentos guardados
        desde la barra lateral, en **"Historial de guardados"**.
-
+ 
     **Columnas admitidas:** cualquier nombre de columna funciona; no es necesario que se llame
     exactamente "Categoria" o "Total". El sistema detecta automáticamente columnas categóricas,
     numéricas y de fecha, incluso si tienen espacios extra o mayúsculas distintas.
     """)
-
+ 
 if not FPDF_DISPONIBLE or not DOCX_DISPONIBLE or not PDFPLUMBER_DISPONIBLE or not KALEIDO_DISPONIBLE:
     faltantes = []
     if not FPDF_DISPONIBLE:
@@ -106,8 +106,8 @@ if not FPDF_DISPONIBLE or not DOCX_DISPONIBLE or not PDFPLUMBER_DISPONIBLE or no
         + ", ".join(faltantes)
         + ". Instálelas con pip para habilitarlas por completo."
     )
-
-
+ 
+ 
 # ====================================
 # PERSISTENCIA DE SESIÓN
 # ====================================
@@ -122,18 +122,18 @@ if not FPDF_DISPONIBLE or not DOCX_DISPONIBLE or not PDFPLUMBER_DISPONIBLE or no
 #    sobrescribe ninguna anterior) cada vez que el usuario presiona el botón
 #    "Guardar ahora". Cada entrada queda con su fecha y hora exacta
 #    (día/mes/año hora:minuto:segundo) y puede cargarse de forma independiente.
-
+ 
 CACHE_DIR = Path(".cache_reportes")
 CACHE_ARCHIVOS_DIR = CACHE_DIR / "archivos"
 META_PATH = CACHE_DIR / "sesion.json"
-
+ 
 HISTORIAL_DIR = CACHE_DIR / "historial"
-
-
+ 
+ 
 def hay_sesion_guardada() -> bool:
     return META_PATH.exists()
-
-
+ 
+ 
 def guardar_sesion():
     """Autoguardado: sobrescribe la 'última sesión' con el estado actual."""
     try:
@@ -142,7 +142,7 @@ def guardar_sesion():
             ruta = CACHE_ARCHIVOS_DIR / nombre
             if not ruta.exists():
                 ruta.write_bytes(info["bytes"])
-
+ 
         meta = {
             "archivos": [
                 {"nombre": nombre, "tipo": info["tipo"]}
@@ -155,8 +155,8 @@ def guardar_sesion():
         META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     except Exception as e:
         st.sidebar.warning(f"No fue posible guardar la sesión: {e}")
-
-
+ 
+ 
 def cargar_sesion():
     """Carga la 'última sesión' autoguardada."""
     if not META_PATH.exists():
@@ -165,7 +165,7 @@ def cargar_sesion():
         meta = json.loads(META_PATH.read_text())
     except Exception:
         return
-
+ 
     for archivo_meta in meta.get("archivos", []):
         nombre = archivo_meta["nombre"]
         ruta = CACHE_ARCHIVOS_DIR / nombre
@@ -176,8 +176,8 @@ def cargar_sesion():
             }
     st.session_state.graficos = meta.get("graficos", [])
     st.session_state.datasets_seleccionados = meta.get("datasets_seleccionados", [])
-
-
+ 
+ 
 def borrar_sesion_guardada():
     """Borra únicamente el autoguardado de 'última sesión' (no toca el historial)."""
     try:
@@ -188,10 +188,10 @@ def borrar_sesion_guardada():
                 f.unlink()
     except Exception as e:
         st.sidebar.warning(f"No fue posible borrar la sesión guardada: {e}")
-
-
+ 
+ 
 # ---- Historial de guardados manuales ----
-
+ 
 def guardar_historial() -> str | None:
     """
     Crea una NUEVA entrada en el historial de guardados (nunca sobrescribe las
@@ -206,10 +206,10 @@ def guardar_historial() -> str | None:
         carpeta = HISTORIAL_DIR / id_guardado
         carpeta_archivos = carpeta / "archivos"
         carpeta_archivos.mkdir(parents=True, exist_ok=True)
-
+ 
         for nombre, info in st.session_state.archivos_originales.items():
             (carpeta_archivos / nombre).write_bytes(info["bytes"])
-
+ 
         meta = {
             "id": id_guardado,
             "fecha": ahora.strftime("%d/%m/%Y %H:%M:%S"),
@@ -225,8 +225,8 @@ def guardar_historial() -> str | None:
     except Exception as e:
         st.sidebar.warning(f"No fue posible guardar en el historial: {e}")
         return None
-
-
+ 
+ 
 def listar_historial() -> list:
     """Devuelve la lista de guardados manuales, del más reciente al más antiguo."""
     if not HISTORIAL_DIR.exists():
@@ -241,8 +241,8 @@ def listar_historial() -> list:
                 continue
     entradas.sort(key=lambda m: m.get("id", ""), reverse=True)
     return entradas
-
-
+ 
+ 
 def cargar_desde_historial(id_guardado: str):
     """Reemplaza el estado actual por el de una entrada específica del historial."""
     carpeta = HISTORIAL_DIR / id_guardado
@@ -253,7 +253,7 @@ def cargar_desde_historial(id_guardado: str):
         meta = json.loads(meta_path.read_text())
     except Exception:
         return
-
+ 
     st.session_state.archivos_originales = {}
     for archivo_meta in meta.get("archivos", []):
         nombre = archivo_meta["nombre"]
@@ -265,8 +265,8 @@ def cargar_desde_historial(id_guardado: str):
             }
     st.session_state.graficos = meta.get("graficos", [])
     st.session_state.datasets_seleccionados = meta.get("datasets_seleccionados", [])
-
-
+ 
+ 
 def borrar_entrada_historial(id_guardado: str):
     try:
         carpeta = HISTORIAL_DIR / id_guardado
@@ -274,20 +274,20 @@ def borrar_entrada_historial(id_guardado: str):
             shutil.rmtree(carpeta)
     except Exception as e:
         st.sidebar.warning(f"No fue posible borrar ese guardado: {e}")
-
-
+ 
+ 
 def borrar_historial_completo():
     try:
         if HISTORIAL_DIR.exists():
             shutil.rmtree(HISTORIAL_DIR)
     except Exception as e:
         st.sidebar.warning(f"No fue posible borrar el historial: {e}")
-
-
+ 
+ 
 # ====================================
 # ESTADO DE SESIÓN (multi-archivo, multi-dataset, multi-gráfico)
 # ====================================
-
+ 
 if "archivos_originales" not in st.session_state:
     st.session_state.archivos_originales = {}   # nombre_archivo -> {"bytes":..., "tipo":...}
 if "datasets" not in st.session_state:
@@ -296,8 +296,8 @@ if "graficos" not in st.session_state:
     st.session_state.graficos = []                # lista de dicts {id, dataset, eje_x, eje_y, tipo}
 if "datasets_seleccionados" not in st.session_state:
     st.session_state.datasets_seleccionados = []   # lista de nombres de dataset incluidos en el reporte
-
-
+ 
+ 
 # Ofrecer recuperar la sesión anterior si aún no hay archivos cargados en esta sesión
 if not st.session_state.archivos_originales and hay_sesion_guardada():
     with st.sidebar:
@@ -313,7 +313,7 @@ if not st.session_state.archivos_originales and hay_sesion_guardada():
         if st.button(" Cargar última sesión"):
             cargar_sesion()
             st.rerun()
-
+ 
 with st.sidebar:
     st.markdown("###  Gestión de sesión")
     col_guardar, col_borrar = st.columns(2)
@@ -327,7 +327,7 @@ with st.sidebar:
         if st.button("Borrar guardada"):
             borrar_sesion_guardada()
             st.success("Sesión guardada eliminada.")
-
+ 
     st.markdown("###  Historial de guardados")
     historial = listar_historial()
     if not historial:
@@ -352,24 +352,24 @@ with st.sidebar:
         if st.button("Vaciar historial completo"):
             borrar_historial_completo()
             st.rerun()
-
-
+ 
+ 
 # ====================================
 # FUNCIONES AUXILIARES DE LECTURA / CALIDAD DE DATOS
 # ====================================
-
+ 
 def normalizar_nombre(col: str) -> str:
     """Normaliza un nombre de columna para comparaciones flexibles."""
     return str(col).strip().lower().replace("_", " ")
-
-
+ 
+ 
 def limpiar_encabezados(df: pd.DataFrame) -> pd.DataFrame:
     """Quita espacios sobrantes en los nombres de columnas."""
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
     return df
-
-
+ 
+ 
 def detectar_fila_encabezado(archivo_bytes: bytes, es_csv: bool, hoja=None, max_filas_revisar: int = 10):
     """
     Busca la primera fila que parece un encabezado real cuando hay filas
@@ -382,15 +382,15 @@ def detectar_fila_encabezado(archivo_bytes: bytes, es_csv: bool, hoja=None, max_
             vista = pd.read_excel(BytesIO(archivo_bytes), header=None, sheet_name=hoja, nrows=max_filas_revisar)
     except Exception:
         return 0
-
+ 
     for i in range(len(vista)):
         fila = vista.iloc[i]
         no_nulos = fila.notna().sum()
         if no_nulos >= max(2, int(0.6 * len(fila))):
             return i
     return 0
-
-
+ 
+ 
 def intentar_convertir_numericas(df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
     """Convierte a numéricas las columnas de texto que en realidad contienen números."""
     df = df.copy()
@@ -405,8 +405,8 @@ def intentar_convertir_numericas(df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
             df[col] = serie_convertida
             convertidas.append(col)
     return df, convertidas
-
-
+ 
+ 
 def intentar_convertir_fechas(df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
     """Detecta columnas que parecen fechas (por nombre o contenido) y las convierte."""
     df = df.copy()
@@ -421,43 +421,43 @@ def intentar_convertir_fechas(df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
                 df[col] = serie_convertida
                 convertidas.append(col)
     return df, convertidas
-
-
+ 
+ 
 def validar_calidad_datos(df: pd.DataFrame) -> list:
     """Revisa el dataframe y devuelve una lista de advertencias descriptivas."""
     advertencias = []
-
+ 
     if df.empty:
         advertencias.append("El archivo no contiene registros (está vacío).")
         return advertencias
-
+ 
     filas_totalmente_vacias = df.isna().all(axis=1).sum()
     if filas_totalmente_vacias > 0:
         advertencias.append(f"Se encontraron {filas_totalmente_vacias} fila(s) completamente vacía(s).")
-
+ 
     for col in df.columns:
         n_nulos = df[col].isna().sum()
         if n_nulos > 0:
             advertencias.append(f"La columna '{col}' tiene {n_nulos} valor(es) vacío(s).")
-
+ 
         if pd.api.types.is_numeric_dtype(df[col]):
             n_negativos = (df[col] < 0).sum()
             if n_negativos > 0:
                 advertencias.append(f"La columna '{col}' tiene {n_negativos} valor(es) negativo(s).")
-
+ 
         if pd.api.types.is_datetime64_any_dtype(df[col]):
             hoy = pd.Timestamp.now()
             n_futuras = (df[col] > hoy).sum()
             if n_futuras > 0:
                 advertencias.append(f"La columna '{col}' tiene {n_futuras} fecha(s) posterior(es) a hoy (posible inconsistencia).")
-
+ 
     return advertencias
-
-
+ 
+ 
 # ====================================
 # LECTORES MULTI-FORMATO (Excel, CSV, Word, PDF, SQLite)
 # ====================================
-
+ 
 def obtener_sub_opciones(nombre: str, info: dict):
     """
     Devuelve la lista de 'sub-elementos' seleccionables dentro de un archivo
@@ -470,10 +470,10 @@ def obtener_sub_opciones(nombre: str, info: dict):
         if tipo in ("xlsx", "xls"):
             xls = pd.ExcelFile(BytesIO(b))
             return xls.sheet_names
-
+ 
         if tipo == "csv":
             return None
-
+ 
         if tipo == "docx":
             if not DOCX_DISPONIBLE:
                 return None
@@ -481,7 +481,7 @@ def obtener_sub_opciones(nombre: str, info: dict):
             etiquetas = [f"Tabla {i + 1}" for i in range(len(doc.tables))]
             etiquetas.append("Texto completo (párrafos)")
             return etiquetas
-
+ 
         if tipo == "pdf":
             if not PDFPLUMBER_DISPONIBLE:
                 return None
@@ -493,7 +493,7 @@ def obtener_sub_opciones(nombre: str, info: dict):
                         etiquetas.append(f"Página {i + 1} - Tabla {j + 1}")
             etiquetas.append("Texto completo (por página)")
             return etiquetas
-
+ 
         if tipo in ("db", "sqlite", "sqlite3"):
             ruta_tmp = Path(f"._tmp_{nombre}.sqlite")
             ruta_tmp.write_bytes(b)
@@ -509,19 +509,19 @@ def obtener_sub_opciones(nombre: str, info: dict):
     except Exception:
         return None
     return None
-
-
+ 
+ 
 def leer_sub_dataset(nombre: str, info: dict, etiqueta, fila_encabezado: int = 0) -> pd.DataFrame:
     """Lee un dataset concreto (hoja/tabla/archivo completo) según el tipo de archivo."""
     tipo = info["tipo"]
     b = info["bytes"]
-
+ 
     if tipo == "csv":
         return pd.read_csv(BytesIO(b), header=fila_encabezado)
-
+ 
     if tipo in ("xlsx", "xls"):
         return pd.read_excel(BytesIO(b), sheet_name=etiqueta, header=fila_encabezado)
-
+ 
     if tipo == "docx":
         doc = docx.Document(BytesIO(b))
         if etiqueta == "Texto completo (párrafos)":
@@ -533,7 +533,7 @@ def leer_sub_dataset(nombre: str, info: dict, etiqueta, fila_encabezado: int = 0
         if len(filas) > 1:
             return pd.DataFrame(filas[1:], columns=filas[0])
         return pd.DataFrame(filas)
-
+ 
     if tipo == "pdf":
         if etiqueta == "Texto completo (por página)":
             textos = []
@@ -550,7 +550,7 @@ def leer_sub_dataset(nombre: str, info: dict, etiqueta, fila_encabezado: int = 0
         if len(tabla) > 1:
             return pd.DataFrame(tabla[1:], columns=tabla[0])
         return pd.DataFrame(tabla)
-
+ 
     if tipo in ("db", "sqlite", "sqlite3"):
         ruta_tmp = Path(f"._tmp_{nombre}.sqlite")
         ruta_tmp.write_bytes(b)
@@ -561,16 +561,16 @@ def leer_sub_dataset(nombre: str, info: dict, etiqueta, fila_encabezado: int = 0
         finally:
             ruta_tmp.unlink(missing_ok=True)
         return df
-
+ 
     raise ValueError(f"Tipo de archivo no soportado: {tipo}")
-
-
+ 
+ 
 # ====================================
 # EXPORTACIÓN (Excel / PDF con gráficos incluidos)
 # ====================================
-
+ 
 PALETA_COLORES = px.colors.qualitative.Plotly  # paleta de colores explícita para forzar color en la exportación
-
+ 
 # Tamaño de embebido de cada gráfico en la hoja "Graficos" del Excel (en píxeles).
 # Se fija explícitamente para que las imágenes no se dibujen "a tamaño completo" (lo que
 # provocaba que unas taparan a otras); a partir de este tamaño se calcula cuántas filas
@@ -579,8 +579,8 @@ ANCHO_IMG_EXCEL = 640
 ALTO_IMG_EXCEL = 356
 ALTO_FILA_EXCEL_PX = 20  # alto aproximado, en píxeles, de una fila por defecto en Excel
 FILAS_POR_IMAGEN_EXCEL = (ALTO_IMG_EXCEL // ALTO_FILA_EXCEL_PX) + 4  # + margen para el título y separación
-
-
+ 
+ 
 def fig_a_imagen_png(fig, ancho=900, alto=500):
     """
     Convierte una figura de Plotly a bytes PNG (requiere kaleido).
@@ -599,20 +599,20 @@ def fig_a_imagen_png(fig, ancho=900, alto=500):
         return fig.to_image(format="png", width=ancho, height=alto, engine="kaleido", scale=2)
     except Exception:
         return None
-
-
+ 
+ 
 def _dibujar_tabla_pdf(pdf: "FPDF", df: pd.DataFrame, max_columnas: int = 8, alto_fila: int = 6):
     """Dibuja una tabla completa en el PDF, paginando automáticamente (sin límite artificial de filas)."""
     columnas = list(df.columns)[:max_columnas]
     ancho_col = 190 / max(len(columnas), 1)
-
+ 
     def encabezado():
         pdf.set_font("Helvetica", "B", 8)
         for col in columnas:
             pdf.cell(ancho_col, alto_fila, str(col)[:15], border=1)
         pdf.ln()
         pdf.set_font("Helvetica", "", 8)
-
+ 
     encabezado()
     for _, fila in df[columnas].iterrows():
         # Si la fila no cabe en la página actual, se agrega una nueva página y se repite el encabezado
@@ -622,13 +622,13 @@ def _dibujar_tabla_pdf(pdf: "FPDF", df: pd.DataFrame, max_columnas: int = 8, alt
         for col in columnas:
             pdf.cell(ancho_col, alto_fila, str(fila[col])[:15], border=1)
         pdf.ln()
-
+ 
     if len(df.columns) > max_columnas:
         pdf.set_font("Helvetica", "I", 7)
         pdf.cell(0, 6, f"(Se muestran {max_columnas} de {len(df.columns)} columnas)", ln=True)
         pdf.ln(2)
-
-
+ 
+ 
 def _dibujar_grafico_pdf(pdf: "FPDF", titulo: str, img_bytes: bytes):
     """Agrega una página nueva con un gráfico (título + imagen)."""
     pdf.add_page()
@@ -646,15 +646,15 @@ def _dibujar_grafico_pdf(pdf: "FPDF", titulo: str, img_bytes: bytes):
     except Exception:
         pdf.set_font("Helvetica", "", 10)
         pdf.cell(0, 8, "(No fue posible incrustar este gráfico)", ln=True)
-
-
+ 
+ 
 def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin_dataset: list | None = None) -> bytes:
     """
     Genera un PDF con, para CADA dataset incluido en el reporte:
     sus KPIs, la TABLA COMPLETA de datos filtrados (paginada, sin límite de filas) y,
     justo después de la tabla, el/los gráfico(s) que usan ese dataset (cada uno en su
     propia página, para que se vea grande y legible).
-
+ 
     datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
     imagenes_por_dataset: {nombre_dataset: [(titulo, bytes_png), ...]}
     imagenes_sin_dataset: gráficos "huérfanos" (caso excepcional, por si su dataset ya no
@@ -668,45 +668,45 @@ def generar_pdf(datasets_reporte: dict, imagenes_por_dataset: dict, imagenes_sin
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 6, f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True)
     pdf.ln(2)
-
+ 
     for nombre_dataset, contenido in datasets_reporte.items():
         df = contenido["df"]
         kpis = contenido.get("kpis", {})
-
+ 
         if pdf.get_y() > 250:
             pdf.add_page()
-
+ 
         pdf.set_font("Helvetica", "B", 13)
         pdf.cell(0, 10, f"Dataset: {nombre_dataset}", ln=True)
-
+ 
         if kpis:
             pdf.set_font("Helvetica", "", 10)
             for etiqueta, valor in kpis.items():
                 pdf.cell(0, 7, f"{etiqueta}: {valor}", ln=True)
             pdf.ln(2)
-
+ 
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 8, f"Registros filtrados: {len(df)}", ln=True)
-
+ 
         if df.empty:
             pdf.set_font("Helvetica", "", 9)
             pdf.cell(0, 6, "(Sin registros con los filtros aplicados)", ln=True)
         else:
             _dibujar_tabla_pdf(pdf, df)
-
+ 
         pdf.ln(4)
-
+ 
         # Gráficos de ESTE dataset, justo después de su tabla (uno por página)
         for titulo, img_bytes in imagenes_por_dataset.get(nombre_dataset, []):
             _dibujar_grafico_pdf(pdf, titulo, img_bytes)
-
+ 
     # Por si quedara algún gráfico sin dataset asociado en el reporte (caso excepcional)
     for titulo, img_bytes in (imagenes_sin_dataset or []):
         _dibujar_grafico_pdf(pdf, titulo, img_bytes)
-
+ 
     return bytes(pdf.output(dest="S"))
-
-
+ 
+ 
 def _nombre_hoja_valido(nombre: str, usados: set) -> str:
     """Excel limita los nombres de hoja a 31 caracteres y no permite ciertos símbolos; evita duplicados."""
     limpio = "".join(c for c in nombre if c not in r'[]:*?/\\')[:31] or "Datos"
@@ -718,20 +718,20 @@ def _nombre_hoja_valido(nombre: str, usados: set) -> str:
         contador += 1
     usados.add(candidato)
     return candidato
-
-
+ 
+ 
 def generar_excel(datasets_reporte: dict, imagenes_graficos: list) -> bytes:
     """
     Genera un Excel con UNA HOJA POR CADA dataset incluido en el reporte (datos filtrados),
     una hoja "Indicadores" combinada y una hoja "Graficos" con los gráficos incrustados,
     cada uno con un tamaño fijo y suficiente espacio vertical para que no se superpongan.
-
+ 
     datasets_reporte: {nombre_dataset: {"df": DataFrame_filtrado, "kpis": {...}}}
     imagenes_graficos: [(titulo, bytes_png, nombre_dataset), ...]
     """
     buffer = BytesIO()
     nombres_hoja_usados = set()
-
+ 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         filas_kpis = []
         for nombre_dataset, contenido in datasets_reporte.items():
@@ -739,10 +739,10 @@ def generar_excel(datasets_reporte: dict, imagenes_graficos: list) -> bytes:
             contenido["df"].to_excel(writer, sheet_name=hoja, index=False)
             for etiqueta, valor in contenido.get("kpis", {}).items():
                 filas_kpis.append({"Dataset": nombre_dataset, "Indicador": etiqueta, "Valor": valor})
-
+ 
         if filas_kpis:
             pd.DataFrame(filas_kpis).to_excel(writer, sheet_name="Indicadores", index=False)
-
+ 
         if imagenes_graficos and OPENPYXL_IMAGENES_DISPONIBLE:
             workbook = writer.book
             hoja_graficos = workbook.create_sheet("Graficos")
@@ -760,22 +760,22 @@ def generar_excel(datasets_reporte: dict, imagenes_graficos: list) -> bytes:
                 except Exception:
                     hoja_graficos.cell(row=fila_actual + 1, column=1, value="(No fue posible incrustar este gráfico)")
                 fila_actual += FILAS_POR_IMAGEN_EXCEL
-
+ 
     return buffer.getvalue()
-
-
+ 
+ 
 # ====================================
 # CARGA DE ARCHIVOS (uno o varios, distintos formatos)
 # ====================================
-
+ 
 st.subheader("1. Cargar archivos")
-
+ 
 archivos_subidos = st.file_uploader(
     "Seleccione uno o varios archivos (puede arrastrar varios a la vez, o agregar más después)",
     type=["xlsx", "xls", "csv", "docx", "pdf", "db", "sqlite", "sqlite3"],
     accept_multiple_files=True,
 )
-
+ 
 if archivos_subidos:
     for archivo in archivos_subidos:
         if archivo.name in st.session_state.archivos_originales:
@@ -790,19 +790,19 @@ if archivos_subidos:
             "tipo": extension,
         }
     guardar_sesion()
-
+ 
 if not st.session_state.archivos_originales:
     st.info("👆 Cargue uno o varios archivos (Excel, CSV, Word, PDF o SQLite) para comenzar.")
     st.stop()
-
+ 
 # ====================================
 # SELECCIÓN DE HOJAS / TABLAS POR ARCHIVO -> CONSTRUCCIÓN DE DATASETS
 # ====================================
-
+ 
 st.subheader("2. Archivos cargados")
-
+ 
 nuevos_datasets = {}
-
+ 
 for nombre, info in list(st.session_state.archivos_originales.items()):
     with st.expander(f"📄 {nombre}  ({info['tipo'].upper()})", expanded=True):
         col_info, col_quitar = st.columns([5, 1])
@@ -814,9 +814,9 @@ for nombre, info in list(st.session_state.archivos_originales.items()):
                 ]
                 guardar_sesion()
                 st.rerun()
-
+ 
         tipo = info["tipo"]
-
+ 
         if tipo == "csv":
             fila_sugerida = detectar_fila_encabezado(info["bytes"], True)
             fila = st.number_input(
@@ -831,28 +831,28 @@ for nombre, info in list(st.session_state.archivos_originales.items()):
                 st.caption(f"✅ {df.shape[0]} filas, {df.shape[1]} columnas")
             except Exception as e:
                 st.error(f"No se pudo leer '{nombre}': {e}")
-
+ 
         else:
             sub_opciones = obtener_sub_opciones(nombre, info)
-
+ 
             if not sub_opciones:
                 st.warning(
                     "No se pudieron detectar hojas/tablas en este archivo, "
                     "o falta instalar la librería necesaria para este formato."
                 )
                 continue
-
+ 
             if tipo in ("xlsx", "xls"):
                 etiqueta_selector = "Hoja(s) a cargar"
             elif tipo in ("db", "sqlite", "sqlite3"):
                 etiqueta_selector = "Tabla(s) a cargar"
             else:
                 etiqueta_selector = "Elemento(s) a cargar (tabla o texto)"
-
+ 
             seleccionadas = st.multiselect(
                 etiqueta_selector, sub_opciones, default=[sub_opciones[0]], key=f"sel_{nombre}"
             )
-
+ 
             for etiqueta in seleccionadas:
                 fila = 0
                 if tipo in ("xlsx", "xls"):
@@ -871,33 +871,33 @@ for nombre, info in list(st.session_state.archivos_originales.items()):
                     st.caption(f"✅ {etiqueta}: {df.shape[0]} filas, {df.shape[1]} columnas")
                 except Exception as e:
                     st.error(f"No se pudo leer '{etiqueta}' de '{nombre}': {e}")
-
+ 
 st.session_state.datasets = nuevos_datasets
-
+ 
 if not st.session_state.datasets:
     st.info("No hay datasets disponibles todavía. Revise la selección de hojas/tablas arriba.")
     st.stop()
-
+ 
 # Aplicar conversiones automáticas a cada dataset
 for nombre_ds, df_ds in list(st.session_state.datasets.items()):
     df_ds, _ = intentar_convertir_numericas(df_ds)
     df_ds, _ = intentar_convertir_fechas(df_ds)
     st.session_state.datasets[nombre_ds] = df_ds
-
+ 
 guardar_sesion()
-
+ 
 # ====================================
 # SELECCIÓN DE DATASETS PARA EL ANÁLISIS Y EL REPORTE (soporta varios a la vez)
 # ====================================
-
+ 
 st.subheader("3. Datasets a incluir en el análisis y el reporte")
-
+ 
 nombres_datasets = list(st.session_state.datasets.keys())
-
+ 
 seleccion_previa = [d for d in st.session_state.datasets_seleccionados if d in nombres_datasets]
 if not seleccion_previa:
     seleccion_previa = [nombres_datasets[0]]
-
+ 
 datasets_seleccionados = st.multiselect(
     "Elija uno o varios datasets (por ejemplo, provenientes de 2 archivos distintos). "
     "Cada uno se filtra por separado más abajo, y el reporte final combina los datos "
@@ -905,41 +905,41 @@ datasets_seleccionados = st.multiselect(
     nombres_datasets,
     default=seleccion_previa,
 )
-
+ 
 if not datasets_seleccionados:
     st.warning("Seleccione al menos un dataset para continuar.")
     st.stop()
-
+ 
 st.session_state.datasets_seleccionados = datasets_seleccionados
-
+ 
 # resultados_por_dataset: nombre_dataset -> {"df": DataFrame_filtrado, "kpis": {...}}
 resultados_por_dataset = {}
-
+ 
 tabs = st.tabs(datasets_seleccionados)
-
+ 
 for nombre_ds, tab in zip(datasets_seleccionados, tabs):
     with tab:
         datos = st.session_state.datasets[nombre_ds]
-
+ 
         advertencias = validar_calidad_datos(datos)
         if advertencias:
             with st.expander(f"⚠️ Advertencias de calidad de datos ({len(advertencias)})", expanded=False):
                 for a in advertencias:
                     st.warning(a)
-
+ 
         st.markdown("**Vista previa**")
         st.dataframe(datos, use_container_width=True)
-
+ 
         # --- Filtros propios de este dataset ---
         st.markdown("**Filtros**")
         datos_filtrados = datos.copy()
-
+ 
         columnas_categoricas = [
             c for c in datos.columns
             if (datos[c].dtype == "object" or str(datos[c].dtype) == "category")
             and datos[c].nunique(dropna=True) <= 50
         ]
-
+ 
         if columnas_categoricas:
             columnas_filtro_ui = st.columns(min(3, len(columnas_categoricas)))
             for i, col in enumerate(columnas_categoricas):
@@ -954,7 +954,7 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
                     datos_filtrados = datos_filtrados.iloc[0:0]
         else:
             st.caption("No se detectaron columnas categóricas para filtrar.")
-
+ 
         columnas_fecha = [c for c in datos.columns if pd.api.types.is_datetime64_any_dtype(datos[c])]
         for col in columnas_fecha:
             col_valida = datos[col].dropna()
@@ -970,15 +970,15 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
                 datos_filtrados = datos_filtrados[
                     (datos_filtrados[col].dt.date >= rango[0]) & (datos_filtrados[col].dt.date <= rango[1])
                 ]
-
+ 
         if datos_filtrados.empty:
             st.warning("Los filtros seleccionados no arrojan ningún registro para este dataset.")
-
+ 
         # --- Indicadores propios de este dataset ---
         st.markdown("**Indicadores**")
         columnas_numericas = datos_filtrados.select_dtypes(include="number").columns.tolist()
         kpis_dataset = {}
-
+ 
         if columnas_numericas and not datos_filtrados.empty:
             columna_indicador = st.selectbox(
                 "Columna numérica para indicadores", columnas_numericas, key=f"kpi_col_{nombre_ds}"
@@ -986,12 +986,12 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
             total = datos_filtrados[columna_indicador].sum()
             promedio = datos_filtrados[columna_indicador].mean()
             registros = len(datos_filtrados)
-
+ 
             c1, c2, c3 = st.columns(3)
             c1.metric("Total", f"{total:,.2f}")
             c2.metric("Promedio", f"{promedio:,.2f}")
             c3.metric("Registros", registros)
-
+ 
             kpis_dataset = {
                 "Columna analizada": columna_indicador,
                 "Total": f"{total:,.2f}",
@@ -1000,18 +1000,18 @@ for nombre_ds, tab in zip(datasets_seleccionados, tabs):
             }
         else:
             st.caption("No hay columnas numéricas disponibles, o los filtros actuales no dejan registros.")
-
+ 
         st.markdown("**Datos filtrados**")
         st.dataframe(datos_filtrados, use_container_width=True)
-
+ 
         resultados_por_dataset[nombre_ds] = {"df": datos_filtrados, "kpis": kpis_dataset}
-
+ 
 # ====================================
 # GENERADOR DE GRÁFICOS (usa los datos YA FILTRADOS de cada dataset seleccionado)
 # ====================================
-
+ 
 st.subheader("4. Generador de Gráficos")
-
+ 
 dataset_para_grafico = st.selectbox(
     "Dataset a usar en el nuevo gráfico (se grafican los datos ya filtrados arriba)",
     datasets_seleccionados,
@@ -1020,7 +1020,7 @@ dataset_para_grafico = st.selectbox(
 df_para_grafico = resultados_por_dataset[dataset_para_grafico]["df"]
 columnas_grafico = df_para_grafico.columns.tolist()
 columnas_num_grafico = df_para_grafico.select_dtypes(include="number").columns.tolist()
-
+ 
 if df_para_grafico.empty:
     st.info(f"El dataset '{dataset_para_grafico}' no tiene registros con los filtros actuales.")
 elif not columnas_num_grafico:
@@ -1033,7 +1033,11 @@ else:
         with col_y:
             eje_y_nuevo = st.selectbox("Eje Y (numérico)", columnas_num_grafico, key="nuevo_eje_y")
         with col_tipo:
-            tipo_nuevo = st.selectbox("Tipo de gráfico", ["Barras", "Pastel", "Líneas", "Dispersión"], key="nuevo_tipo")
+            tipo_nuevo = st.selectbox(
+                "Tipo de gráfico",
+                ["Barras", "Pastel", "Líneas", "Dispersión", "Histograma", "Boxplot"],
+                key="nuevo_tipo"
+            )
         agregar = st.form_submit_button("➕ Agregar gráfico")
         if agregar:
             st.session_state.graficos.append({
@@ -1045,11 +1049,11 @@ else:
             })
             guardar_sesion()
             st.rerun()
-
+ 
 # Cada elemento: (titulo, bytes_png, nombre_dataset) — se conserva el dataset de origen
 # para poder agrupar los gráficos por dataset al exportar (PDF) o para dar contexto (Excel).
 imagenes_graficos = []
-
+ 
 if not st.session_state.graficos:
     st.info("Aún no ha agregado gráficos. Use el formulario de arriba para crear el primero.")
 else:
@@ -1061,14 +1065,19 @@ else:
                 "Agréguelo arriba para poder verlo y exportarlo."
             )
             continue
-
+ 
         df_g = contenido_ds["df"]
         if df_g.empty:
             st.info(f"'{g['dataset']}' no tiene registros con los filtros actuales; este gráfico se omite.")
             continue
-
+ 
+        if len(df_g) > 50000:
+            st.warning(
+                f"⚠️ El dataset tiene {len(df_g):,} registros. Es muy grande y el gráfico puede tardar en cargar."
+            )
+ 
         st.markdown(f"**{g['tipo']}** — {g['eje_y']} por {g['eje_x']}  _(dataset: {g['dataset']}, datos filtrados)_")
-
+ 
         try:
             if g["eje_x"] == g["eje_y"]:
                 resumen = df_g[[g["eje_x"]]].groupby(g["eje_x"]).size().reset_index(name="Cantidad")
@@ -1077,52 +1086,85 @@ else:
             else:
                 resumen = df_g.groupby(g["eje_x"])[g["eje_y"]].sum().reset_index()
                 col_valor = g["eje_y"]
-
+ 
             color_principal = PALETA_COLORES[indice_color % len(PALETA_COLORES)]
-
+ 
             if g["tipo"] == "Barras":
                 fig = px.bar(
-                    resumen, x=g["eje_x"], y=col_valor, title=f"{col_valor} por {g['eje_x']}",
-                    color=g["eje_x"], color_discrete_sequence=PALETA_COLORES,
-                )
-            elif g["tipo"] == "Pastel":
-                fig = px.pie(
-                    resumen, names=g["eje_x"], values=col_valor, title=f"Distribución de {col_valor}",
+                    resumen,
+                    x=g["eje_x"],
+                    y=col_valor,
+                    title=f"{col_valor} por {g['eje_x']}",
+                    color=g["eje_x"],
                     color_discrete_sequence=PALETA_COLORES,
                 )
+ 
+            elif g["tipo"] == "Pastel":
+                fig = px.pie(
+                    resumen,
+                    names=g["eje_x"],
+                    values=col_valor,
+                    title=f"Distribución de {col_valor}",
+                    color_discrete_sequence=PALETA_COLORES,
+                )
+ 
             elif g["tipo"] == "Líneas":
                 fig = px.line(
-                    resumen, x=g["eje_x"], y=col_valor, title=f"{col_valor} por {g['eje_x']}",
-                    markers=True, color_discrete_sequence=[color_principal],
-                )
-            else:
-                fig = px.scatter(
-                    df_g, x=g["eje_x"], y=g["eje_y"], title=f"{g['eje_y']} vs {g['eje_x']}",
+                    resumen,
+                    x=g["eje_x"],
+                    y=col_valor,
+                    title=f"{col_valor} por {g['eje_x']}",
+                    markers=True,
                     color_discrete_sequence=[color_principal],
                 )
-
+ 
+            elif g["tipo"] == "Histograma":
+                fig = px.histogram(
+                    df_g,
+                    x=g["eje_y"],
+                    title=f"Histograma de {g['eje_y']}",
+                    color_discrete_sequence=[color_principal],
+                )
+ 
+            elif g["tipo"] == "Boxplot":
+                fig = px.box(
+                    df_g,
+                    x=g["eje_x"],
+                    y=g["eje_y"],
+                    title=f"Boxplot de {g['eje_y']} por {g['eje_x']}",
+                    color_discrete_sequence=[color_principal],
+                )
+ 
+            else:
+                fig = px.scatter(
+                    df_g,
+                    x=g["eje_x"],
+                    y=g["eje_y"],
+                    title=f"{g['eje_y']} vs {g['eje_x']}",
+                    color_discrete_sequence=[color_principal],
+                )
             st.plotly_chart(fig, use_container_width=True, key=f"chart_{g['id']}")
-
+ 
             imagen_png = fig_a_imagen_png(fig)
             if imagen_png:
                 titulo_grafico = f"{g['tipo']} - {col_valor} por {g['eje_x']} ({g['dataset']})"
                 imagenes_graficos.append((titulo_grafico, imagen_png, g["dataset"]))
-
+ 
         except Exception as e:
             st.error(f"No fue posible generar este gráfico: {e}")
-
+ 
         if st.button("🗑️ Eliminar este gráfico", key=f"del_{g['id']}"):
             st.session_state.graficos = [x for x in st.session_state.graficos if x["id"] != g["id"]]
             guardar_sesion()
             st.rerun()
-
+ 
         st.divider()
-
+ 
 if st.session_state.graficos and not KALEIDO_DISPONIBLE:
     st.caption(
         "⚠️ Para incluir los gráficos en los reportes de Excel y PDF, instale: `pip install -U kaleido`"
     )
-
+ 
 # Agrupar los gráficos por dataset, para que en el PDF cada uno aparezca justo
 # debajo de la tabla de datos filtrados de su dataset correspondiente.
 imagenes_por_dataset = defaultdict(list)
@@ -1132,20 +1174,20 @@ for titulo, img_bytes, nombre_dataset_grafico in imagenes_graficos:
         imagenes_por_dataset[nombre_dataset_grafico].append((titulo, img_bytes))
     else:
         imagenes_sin_dataset.append((titulo, img_bytes))
-
+ 
 # ====================================
 # EXPORTAR REPORTE (Excel, CSV y PDF — combina TODOS los datasets seleccionados, ya filtrados)
 # ====================================
-
+ 
 st.subheader("5. Exportar Reporte")
-
+ 
 st.caption(
     "El reporte combina los datos FILTRADOS de los datasets elegidos en el paso 3: "
     + ", ".join(datasets_seleccionados)
 )
-
+ 
 col_excel, col_csv, col_pdf = st.columns(3)
-
+ 
 with col_excel:
     try:
         buffer_excel = generar_excel(resultados_por_dataset, imagenes_graficos)
@@ -1160,7 +1202,7 @@ with col_excel:
             st.caption(f"Incluye {len(imagenes_graficos)} gráfico(s) en la hoja 'Graficos', uno debajo del otro sin superponerse.")
     except Exception as e:
         st.error(f"No fue posible generar el Excel: {e}")
-
+ 
 with col_csv:
     st.caption("El CSV no admite varias tablas: descargue un archivo por dataset.")
     for nombre_ds in datasets_seleccionados:
@@ -1177,7 +1219,7 @@ with col_csv:
             )
         except Exception as e:
             st.error(f"No fue posible generar el CSV de '{nombre_ds}': {e}")
-
+ 
 with col_pdf:
     if not FPDF_DISPONIBLE:
         st.caption("Para exportar a PDF instale la librería: pip install fpdf2")
@@ -1196,6 +1238,6 @@ with col_pdf:
                 st.caption(f"Incluye {len(imagenes_graficos)} gráfico(s), cada uno justo después de la tabla de su dataset.")
         except Exception as e:
             st.error(f"No fue posible generar el PDF: {e}")
-
+ 
 # Guardar la sesión al final de cada ejecución (archivos, gráficos, selección de datasets)
 guardar_sesion()
